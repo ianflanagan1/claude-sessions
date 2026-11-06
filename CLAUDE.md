@@ -1,0 +1,7 @@
+# claude-sessions
+
+`devbox run -- task check` runs ruff and the tests, and fails on any problem; run it before finishing. `devbox run -- task lint-file -- <files>` formats and fixes the Python files given.
+
+`registry.parse`, `transcript.summarise`, `activity.touches`, `archive.parse`, `archive.databases`, `processes.parse` and everything in `listing`, `closing` and `attribution` are pure: test them with plain values in `tests/test_registry.py`, `tests/test_transcript.py`, `tests/test_activity.py`, `tests/test_archive.py`, `tests/test_processes.py`, `tests/test_listing.py`, `tests/test_closing.py` and `tests/test_attribution.py`. Reading the files and the editors' databases, asking git and ps, and ending processes are the shell, in `__main__.py`, `registry.running`, `transcript.read`, `activity.read`, `archive.archived`, `processes.describe`, `processes.terminate` and `git.py`, covered by `tests/test_git.py` against throwaway repositories, `tests/test_archive.py` against throwaway SQLite files, `tests/test_processes.py` against real child processes and `tests/test_entry_point.py` against a fake `~/.claude` and editor state.
+
+Claude Code's file formats, and the editors' state, aren't a published interface: skip whatever doesn't parse, never fail on it.

@@ -1,0 +1,38 @@
+"""Which running sessions to close because they're archived in the editor that started them."""
+
+from collections.abc import Mapping
+from datetime import timedelta
+
+from claude_sessions.processes import Process
+from claude_sessions.registry import Entry
+
+MINIMUM_AGE = timedelta(minutes=1)
+"""How long a session's process must have run before it's closed, however long ago the session
+was archived, so one just opened, even from the archived list, is left to settle."""
+
+
+def closable(
+    entries: list[Entry], archived: frozenset[str], processes: Mapping[int, Process | None]
+) -> list[Entry]:
+    """The sessions safe to close: archived, idle, started by an editor's Claude Code panel, and
+    still the process their record names, which started when the record says and has run for
+    MINIMUM_AGE (processes gives each pid's process). A session resumed in a terminal keeps its
+    archived id, so isn't one of them; nor is one busy or waiting for you, or whose process
+    can't be told."""
+    return [
+        entry
+        for entry in entries
+        if entry.session_id in archived
+        and entry.status == "idle"
+        and entry.entrypoint == "claude-vscode"
+        and _settled(entry, processes.get(entry.pid))
+    ]
+
+
+def _settled(entry: Entry, process: Process | None) -> bool:
+    return (
+        process is not None
+        and entry.process_started is not None
+        and entry.process_started.split() == process.started.split()
+        and process.age >= MINIMUM_AGE
+    )

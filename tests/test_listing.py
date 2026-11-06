@@ -1,0 +1,244 @@
+"""Turning sessions into the list claude-sessions prints."""
+
+import re
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+
+from cli_kit.colour import BOLD, GREEN, RED, RESET, YELLOW, Style
+
+from claude_sessions import listing
+from claude_sessions.listing import Session
+from claude_sessions.registry import Entry
+from claude_sessions.transcript import UNKNOWN, Transcript
+
+NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
+PLAIN = Style(enabled=False)
+
+ENTRY = Entry(
+    pid=1,
+    session_id="s1",
+    cwd="/home/me/projects/app",
+    status="idle",
+    name="app-86",
+    named_by="derived",
+    updated=NOW - timedelta(hours=3),
+    entrypoint="claude-vscode",
+    process_started="Fri Oct 30 06:38:10 2026",
+)
+TRANSCRIPT = Transcript(
+    ai_title="Fixing the login form",
+    cwd="/home/me/projects/app/src",
+    model="claude-opus-5-5",
+    context_tokens=52_003,
+    last_activity=NOW - timedelta(minutes=5),
+)
+SESSION = Session(
+    status="idle",
+    location="~/projects/app/src",
+    branch="main",
+    model="claude-opus-5-5",
+    context_tokens=52_003,
+    title="Fixing the login form",
+    user_named=False,
+    last_active=NOW - timedelta(minutes=5),
+)
+
+
+def test_a_session_is_titled_by_claude_and_found_where_it_last_worked():
+    assert listing.session(ENTRY, TRANSCRIPT, "main", "/home/me") == SESSION
+
+
+def test_its_directory_is_where_it_last_worked_else_where_it_started():
+    assert listing.directory(ENTRY, TRANSCRIPT) == "/home/me/projects/app/src"
+    assert listing.directory(ENTRY, UNKNOWN) == "/home/me/projects/app"
+
+
+def test_a_name_you_gave_the_session_is_its_title():
+    entry = replace(ENTRY, name="list sessions", named_by="user")
+    session = listing.session(entry, TRANSCRIPT, "main", "/home/me")
+    assert (session.title, session.user_named) == ("list sessions", True)
+
+
+def test_a_name_claude_code_gave_it_is_its_title_but_not_yours():
+    entry = replace(ENTRY, name="Assess PHP", named_by="auto")
+    session = listing.session(entry, TRANSCRIPT, "main", "/home/me")
+    assert (session.title, session.user_named) == ("Assess PHP", False)
+
+
+def test_without_a_transcript_it_is_where_it_started_and_named_after_its_directory():
+    session = listing.session(ENTRY, UNKNOWN, None, "/home/me")
+    assert session == Session(
+        status="idle",
+        location="~/projects/app",
+        branch=None,
+        model=None,
+        context_tokens=None,
+        title="app-86",
+        user_named=False,
+        last_active=NOW - timedelta(hours=3),
+    )
+
+
+def test_a_status_change_after_its_latest_message_is_its_latest_activity():
+    entry = replace(ENTRY, updated=NOW - timedelta(minutes=1))
+    assert listing.session(entry, TRANSCRIPT, "main", "/home/me").last_active == entry.updated
+
+
+def test_a_directory_outside_home_is_shown_in_full():
+    entry = replace(ENTRY, cwd="/srv/app")
+    assert listing.session(entry, UNKNOWN, None, "/home/me").location == "/srv/app"
+
+
+def test_a_directory_beside_home_with_the_same_prefix_is_not_in_it():
+    entry = replace(ENTRY, cwd="/home/meg/app")
+    assert listing.session(entry, UNKNOWN, None, "/home/me").location == "/home/meg/app"
+
+
+def test_sessions_needing_you_come_first_then_working_then_the_most_recently_active():
+    old_idle = replace(SESSION, title="old", last_active=NOW - timedelta(days=2))
+    new_idle = replace(SESSION, title="new")
+    busy = replace(SESSION, status="busy", title="busy", last_active=NOW - timedelta(hours=1))
+    waiting = replace(
+        SESSION, status="waiting", title="waiting", last_active=NOW - timedelta(days=1)
+    )
+    unknown = replace(SESSION, status=None, title="unknown", last_active=None)
+    titles = [s.title for s in listing.ordered([unknown, old_idle, busy, new_idle, waiting])]
+    assert titles == ["waiting", "busy", "new", "old", "unknown"]
+
+
+def test_only_the_waiting_and_busy_sessions_are_active():
+    sessions = [SESSION, replace(SESSION, status="busy"), replace(SESSION, status="waiting")]
+    assert [s.status for s in listing.active(sessions)] == ["busy", "waiting"]
+
+
+def test_each_session_is_a_line_in_aligned_columns():
+    other = replace(
+        SESSION,
+        status="waiting",
+        location="~/projects/longer-name",
+        branch=None,
+        model="claude-sonnet-5-5",
+        context_tokens=800,
+        title="Another",
+        last_active=NOW - timedelta(days=3),
+    )
+    assert listing.render([SESSION, other], NOW, PLAIN, None) == [
+        "idle     5m  opus-5-5    52k  Fixing the login form  ~/projects/app/src      main",
+        "waiting  3d  sonnet-5-5  800  Another                ~/projects/longer-name",
+    ]
+
+
+def test_a_column_empty_on_every_line_is_left_out():
+    bare = replace(SESSION, branch=None, model=None, context_tokens=None)
+    assert listing.render([bare], NOW, PLAIN, None) == [
+        "idle  5m  Fixing the login form  ~/projects/app/src"
+    ]
+
+
+def test_no_sessions_is_no_lines():
+    assert listing.render([], NOW, PLAIN, None) == []
+
+
+def test_a_title_too_long_for_the_terminal_is_cut_to_fit():
+    [line] = listing.render([SESSION], NOW, PLAIN, 60)
+    assert line == "idle  5m  opus-5-5  52k  Fixing t…  ~/projects/app/src  main"
+    assert len(line) == 60
+
+
+def test_titles_cut_to_fit_stay_aligned():
+    short = replace(SESSION, title="Short")
+    assert listing.render([SESSION, short], NOW, PLAIN, 60) == [
+        "idle  5m  opus-5-5  52k  Fixing t…  ~/projects/app/src  main",
+        "idle  5m  opus-5-5  52k  Short      ~/projects/app/src  main",
+    ]
+
+
+def test_a_long_directory_is_cut_from_the_left_to_35_characters():
+    deep = replace(SESSION, location="~/projects/clients/acme/services/billing-api")
+    [line] = listing.render([deep], NOW, PLAIN, None)
+    assert line.endswith("  …/clients/acme/services/billing-api  main")
+
+
+def test_long_directories_are_cut_only_as_far_as_keeps_them_apart():
+    one = replace(SESSION, location="~/work/one/clients/acme/services/billing-api")
+    two = replace(SESSION, location="~/work/two/clients/acme/services/billing-api")
+    lines = listing.render([one, two], NOW, PLAIN, None)
+    assert [line.split("  ")[-2] for line in lines] == [
+        "…e/clients/acme/services/billing-api",
+        "…o/clients/acme/services/billing-api",
+    ]
+
+
+def test_the_same_long_directory_twice_is_still_cut():
+    deep = replace(SESSION, location="~/projects/clients/acme/services/billing-api")
+    lines = listing.render([deep, deep], NOW, PLAIN, None)
+    assert lines == [lines[0], lines[0]]
+    assert "  …/clients/acme/services/billing-api  " in lines[0]
+
+
+def test_a_name_you_gave_is_bold():
+    [line] = listing.render([replace(SESSION, user_named=True)], NOW, Style(enabled=True), None)
+    assert f"  {BOLD}Fixing the login form{RESET}  " in line
+
+
+def test_the_context_used_is_green_while_healthy_yellow_when_large_and_red_when_time_to_restart():
+    def coloured(tokens: int) -> str:
+        session = replace(SESSION, context_tokens=tokens)
+        [line] = listing.render([session], NOW, Style(enabled=True), None)
+        return line
+
+    assert f"{GREEN}99k{RESET}" in coloured(99_999)
+    assert f"{YELLOW}100k{RESET}" in coloured(100_000)
+    assert f"{YELLOW}149k{RESET}" in coloured(149_999)
+    assert f"{RED}150k{RESET}" in coloured(150_000)
+
+
+def test_coloured_columns_stay_aligned():
+    small = replace(SESSION, context_tokens=800)
+    lines = listing.render([SESSION, small], NOW, Style(enabled=True), None)
+    plain = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in lines]
+    assert plain == listing.render([SESSION, small], NOW, PLAIN, None)
+
+
+def test_how_long_ago_reads_in_the_largest_whole_unit():
+    def age(delta: timedelta) -> str:
+        return listing.age(NOW - delta, NOW)
+
+    assert age(timedelta(seconds=59)) == "now"
+    assert age(timedelta(minutes=59)) == "59m"
+    assert age(timedelta(hours=23)) == "23h"
+    assert age(timedelta(days=9)) == "9d"
+    assert listing.age(None, NOW) == "?"
+
+
+def test_the_count_says_how_many_are_in_each_status():
+    sessions = [SESSION, SESSION, replace(SESSION, status="busy"), replace(SESSION, status=None)]
+    assert listing.count(sessions) == "4 sessions: 1 busy, 2 idle, 1 unknown."
+
+
+def test_the_count_of_one_session_is_singular():
+    assert listing.count([SESSION]) == "1 session: 1 idle."
+
+
+def test_the_count_of_no_sessions_says_none_are_running():
+    assert listing.count([]) == "No sessions running."
+
+
+def test_on_screen_every_line_shows_above_the_summary_when_they_fit():
+    assert listing.fitting(2, 3) == 2
+    assert listing.screen(["a", "b"], 2, "2 sessions.", 3) == ["a", "b", "2 sessions."]
+
+
+def test_on_screen_lines_that_dont_fit_are_counted_in_their_place():
+    assert listing.fitting(5, 4) == 2
+    assert listing.screen(["a", "b"], 5, "5 sessions.", 4) == ["a", "b", "… 3 more", "5 sessions."]
+
+
+def test_on_a_screen_two_rows_high_only_the_count_of_lines_fits_above_the_summary():
+    assert listing.fitting(2, 2) == 0
+    assert listing.screen([], 2, "2 sessions.", 2) == ["… 2 more", "2 sessions."]
+
+
+def test_on_a_screen_one_row_high_only_the_summary_shows():
+    assert listing.fitting(1, 1) == 0
+    assert listing.screen([], 1, "1 session.", 1) == ["1 session."]
