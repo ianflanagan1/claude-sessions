@@ -12,7 +12,20 @@ idle     29m  opus-5-5   33k  Named parameters across TypeScript, Java, C#, Go  
 ➖ 64 sessions: 1 waiting, 4 busy, 59 idle.
 ```
 
-Each line is a session's status, how long since it was last active, its model, how much of its context it has used, its title, the directory it last worked in, and the branch checked out there. A directory longer than 35 characters is cut from the left, but no further than keeps different directories apart. Sessions waiting for you come first, then busy ones, then idle ones, each most recently active first. `--active` lists only those waiting or busy.
+Each line is a session's status, how long since it was last active, its model, how much of its context it has used, its title, the directory it last worked in, and the branch checked out there. A directory longer than 35 characters is cut from the left, but no further than keeps different directories apart. Sessions waiting for you come first, then busy ones, then idle ones, each most recently active first. `--active` lists only those waiting or busy, or with subagents running.
+
+A session's subagents that are still running are listed under it, most recently active first, as `busy`, titled `↳` and what they were asked to do, in the directory each last worked in, such as a worktree of its own:
+
+```
+idle     now  opus-5-5    66k  Repo-fix integration setting failure  ~/projects/cli/repo-tools  main
+busy     now  sonnet-5-5  31k  ↳ Transition fields on move           ~/projects/cli/repo-tools  main
+```
+
+They aren't counted as sessions. A subagent runs inside its session's process, with no record of its own, so whether it's running is worked out:
+
+- A background subagent runs until its session is told it stopped, and again once it's active after that, as when sent a message. Its session can be idle meanwhile.
+- A foreground subagent runs while its session is busy or waiting on it, until its reply ends its turn or the session moves on without it, as when you interrupt it.
+- Either ends with its session's process, so one last active before that process started isn't running.
 
 On a terminal the list stays on screen and is redrawn every 2 seconds, cut to fit the window (only the sessions on screen set the columns' widths), until you press Ctrl-C; it then prints the last count. Piped or captured, it's printed once, as above.
 
@@ -61,6 +74,9 @@ Claude Code's own files, read directly:
 |---|---|
 | Sessions running, their status, name and who named them | `~/.claude/sessions/<pid>.json`, one per session; a file whose process has gone is skipped |
 | Title, directory, model, context used, last activity | The session's transcript, `~/.claude/projects/<dir>/<session id>.jsonl` |
+| Its subagents, what each was asked to do, and whether in the background | `~/.claude/projects/<dir>/<session id>/subagents/agent-<id>.jsonl` and `agent-<id>.meta.json` |
+| When a background subagent stopped | The task notification it sends its session, in the session's transcript |
+| When a session's process started, to leave out subagents of an earlier one | `procStart` in `~/.claude/sessions/<pid>.json` |
 | What each session edited, and where it ran commands | The tool calls in its transcript, and its subagents' in `~/.claude/projects/<dir>/<session id>/subagents/` |
 | Which sessions are archived | Each editor's `state.vscdb`; see [Closing archived sessions](#closing-archived-sessions) |
 | Branch, uncommitted files, when each was last committed | `git` in the session's directory, or the repository given to `changes`. The transcript's own `gitBranch` is the branch it started on, so isn't used |

@@ -3,7 +3,8 @@
 Lists each session on its own line: its status, how long since it was last active, its model,
 how much of its context it has used, its title, the directory it last worked in, cut from the left
 when long, and its git branch. Sessions waiting for you come first, then busy ones, then idle
-ones, each most recently active first.
+ones, each most recently active first. A session's subagents still running are listed under it,
+marked ↳, but aren't counted as sessions.
 
 The title is the name you gave the session, in bold, or one Claude Code gave it; otherwise the
 title Claude gave the conversation, which it updates as the conversation moves on.
@@ -54,6 +55,7 @@ from claude_sessions import (
     listing,
     processes,
     registry,
+    subagents,
     transcript,
 )
 from claude_sessions.activity import Edited, RanIn, Touch
@@ -68,7 +70,10 @@ _PLATFORMS = ("darwin", "linux")
 def main(argv: list[str] | None = None) -> int:
     parser = cli.ArgumentParser(prog="claude-sessions", description=__doc__)
     parser.add_argument(
-        "-a", "--active", action="store_true", help="list only sessions waiting for you or busy"
+        "-a",
+        "--active",
+        action="store_true",
+        help="list only sessions waiting for you or busy, or with subagents running",
     )
     commands = parser.add_subparsers(dest="command", metavar="<command>")
     commands.add_parser(
@@ -198,7 +203,8 @@ _CLEAR_BELOW = "\x1b[J"
 def _print(only_active: bool) -> outcome.NothingToDo:
     _check_platform()
     shown, sessions = _gather(only_active)
-    for line in listing.render(shown, datetime.now(UTC), Style.for_stream(sys.stdout), None):
+    rows = listing.rows(shown)
+    for line in listing.render(rows, datetime.now(UTC), Style.for_stream(sys.stdout), None):
         print(line)
     return outcome.NothingToDo(listing.count(sessions))
 
@@ -214,12 +220,13 @@ def _watch(only_active: bool) -> outcome.NothingToDo:
     try:
         while True:
             shown, sessions = _gather(only_active)
+            rows = listing.rows(shown)
             summary = listing.count(sessions)
             size = shutil.get_terminal_size()
-            # Only the sessions on screen set the columns' widths.
-            fit = shown[: listing.fitting(len(shown), size.lines)]
+            # Only the lines on screen set the columns' widths.
+            fit = rows[: listing.fitting(len(rows), size.lines)]
             lines = listing.render(fit, datetime.now(UTC), colour, size.columns)
-            frame = listing.screen(lines, len(shown), colour(GREY, summary), size.lines)
+            frame = listing.screen(lines, len(rows), colour(GREY, summary), size.lines)
             sys.stdout.write(
                 _HOME + "\n".join(line + _CLEAR_LINE_END for line in frame) + _CLEAR_BELOW
             )
@@ -244,13 +251,26 @@ def _gather(only_active: bool) -> tuple[list[listing.Session], list[listing.Sess
     claude = home / ".claude"
     sessions = []
     branches: dict[str, str | None] = {}  # Many sessions share a directory; ask git once for each.
+
+    def branch(directory: str | None) -> str | None:
+        if directory is None:
+            return None
+        if directory not in branches:
+            branches[directory] = git.branch(directory)
+        return branches[directory]
+
     for entry in registry.running(claude / "sessions"):
         told = transcript.read(claude / "projects", entry.session_id)
         directory = listing.directory(entry, told)
-        if directory is not None and directory not in branches:
-            branches[directory] = git.branch(directory)
-        branch = branches.get(directory) if directory is not None else None
-        sessions.append(listing.session(entry, told, branch, str(home)))
+        since = processes.started_at(entry.process_started)
+        found = subagents.read(claude / "projects", entry.session_id, since)
+        running = [
+            listing.subagent(
+                s, directory, branch(listing.subagent_directory(s, directory)), str(home)
+            )
+            for s in subagents.running(found, entry.status, told, since)
+        ]
+        sessions.append(listing.session(entry, told, branch(directory), str(home), running))
     shown = listing.ordered(listing.active(sessions) if only_active else sessions)
     return shown, sessions
 

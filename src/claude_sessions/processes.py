@@ -4,8 +4,11 @@ import os
 import signal
 import subprocess
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import final
+
+# How `ps -o lstart=` writes a time, with its spacing made single.
+_LSTART = "%a %b %d %H:%M:%S %Y"
 
 
 @final
@@ -33,6 +36,17 @@ def parse(output: str) -> Process | None:
         seconds = seconds * 60 + int(part)
     age = timedelta(days=int(days or "0"), seconds=seconds)
     return Process(age=age, started=" ".join(started.split()))
+
+
+def started_at(started: str | None) -> datetime | None:
+    """When a process started, from `ps -o lstart=`, in this machine's time zone, as ps gives
+    it. None when it isn't such a time."""
+    if started is None:
+        return None
+    try:
+        return datetime.strptime(" ".join(started.split()), _LSTART).astimezone()
+    except ValueError:
+        return None
 
 
 def describe(pid: int) -> Process | None:

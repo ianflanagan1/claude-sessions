@@ -78,6 +78,28 @@ def test_with_no_sessions_it_says_so(tmp_path: Path):
     assert launch(tmp_path).stdout == "➖ No sessions running.\n"
 
 
+def test_a_background_subagent_still_running_is_listed_under_its_idle_session(tmp_path: Path):
+    editor_session(tmp_path, os.getpid(), "s1", "idle")
+    folder = tmp_path / ".claude" / "projects" / "-home" / "s1" / "subagents"
+    folder.mkdir(parents=True)
+    (folder / "agent-a1.meta.json").write_text(
+        json.dumps({"description": "Transition fields on move", "requestShape": "background"})
+    )
+    (folder / "agent-a1.jsonl").write_text(
+        json.dumps(
+            {"type": "user", "isSidechain": True, "timestamp": datetime.now(UTC).isoformat()}
+        )
+        + "\n"
+    )
+    result = launch(tmp_path, "--active")
+    assert result.returncode == 0, result.stderr
+    [session_line, subagent_line, count] = result.stdout.splitlines()
+    assert "session s1" in session_line
+    assert subagent_line.startswith("busy  now  ")
+    assert "↳ Transition fields on move" in subagent_line
+    assert count == "➖ 1 session: 1 idle."
+
+
 def test_on_a_terminal_it_redraws_the_list_as_sessions_change_until_interrupted(tmp_path: Path):
     session(tmp_path, os.getpid(), "s1", "busy", "Fixing the login form")
     terminal, its_end = os.openpty()

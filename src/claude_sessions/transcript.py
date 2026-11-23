@@ -6,7 +6,8 @@ skipped, not an error.
 """
 
 import json
-from collections.abc import Iterable
+import re
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,12 @@ from typing import final
 # Replies Claude Code makes up itself, such as for an interrupted turn, name this model.
 _SYNTHETIC = "<synthetic>"
 _USAGE = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+_END_TURN = "end_turn"
+# What tells a session one of its background subagents stopped, and the kinds of record it's
+# written in: queued, then attached to a turn, or given as a prompt. Others, such as a record of an
+# API request, can repeat it later.
+_STOPPED = re.compile(r"<task-notification>\s*<task-id>([^<\s]+)</task-id>")
+_TOLD_IN = ("queue-operation", "attachment", "user")
 
 
 @final
@@ -28,32 +35,56 @@ class Transcript:
     context_tokens: int | None
     """How much of the context window the latest reply used."""
     last_activity: datetime | None
+    ended: bool
+    """Whether its latest message is a reply that ended its turn."""
+    subagents_stopped: Mapping[str, datetime]
+    """When it was last told each of its background subagents had stopped, by agent id."""
 
 
-UNKNOWN = Transcript(None, None, None, None, None)
+UNKNOWN = Transcript(None, None, None, None, None, False, {})
 
 
 def summarise(lines: Iterable[str]) -> Transcript:
-    """What the lines of a transcript tell, the latest of each."""
+    """What the lines of a session's transcript tell, the latest of each. Its subagents' messages,
+    which it can carry too, are left out."""
+    return _summarise(lines, False)
+
+
+def summarise_subagent(lines: Iterable[str]) -> Transcript:
+    """What the lines of a subagent's own transcript tell, the latest of each. All its messages
+    are marked as a sidechain, the subagent's."""
+    return _summarise(lines, True)
+
+
+def _summarise(lines: Iterable[str], sidechain: bool) -> Transcript:
     ai_title = cwd = model = None
     context_tokens = last_activity = None
+    ended = False
+    stopped: dict[str, datetime] = {}
     for line in lines:
         record = _record(line)
         if record is None:
             continue
-        match record.get("type"):
+        kind = record.get("type")
+        at = _time(record)
+        if kind in _TOLD_IN and at is not None:
+            for agent_id in _stopped_in(record):
+                stopped[agent_id] = max(at, stopped.get(agent_id, at))
+        match kind:
             case "ai-title":
                 ai_title = _text(record, "aiTitle") or ai_title
-            case "user" | "assistant" if not record.get("isSidechain"):
+            case "user" | "assistant" if bool(record.get("isSidechain")) == sidechain:
                 cwd = _text(record, "cwd") or cwd
-                last_activity = _time(record) or last_activity
-                if record["type"] == "assistant":
+                last_activity = at or last_activity
+                ended = False
+                if kind == "assistant":
+                    ended = _stop_reason(record) == _END_TURN
                     reply = _reply(record)
                     if reply is not None:
                         model, context_tokens = reply
             case _:  # Other kinds of record, an open set Claude Code adds to.
                 pass
-    return Transcript(ai_title, cwd, model, context_tokens, last_activity)
+    return Transcript(ai_title, cwd, model, context_tokens, last_activity, ended, stopped)
 
 
 def read(projects_dir: Path, session_id: str) -> Transcript:
@@ -74,6 +105,28 @@ def _record(line: str) -> dict[str, object] | None:
     except ValueError:
         return None
     return record if isinstance(record, dict) else None
+
+
+def _stopped_in(record: dict[str, object]) -> list[str]:
+    """The agent ids of the background subagents the record tells have stopped."""
+    return [agent_id for text in _strings(record) for agent_id in _STOPPED.findall(text)]
+
+
+def _strings(value: object) -> Iterator[str]:
+    """Every string in value, however deep."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+def _stop_reason(record: dict[str, object]) -> object:
+    message = record.get("message")
+    return message.get("stop_reason") if isinstance(message, dict) else None
 
 
 def _reply(record: dict[str, object]) -> tuple[str, int] | None:

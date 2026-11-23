@@ -4,11 +4,12 @@ import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
-from cli_kit.colour import BOLD, GREEN, RED, RESET, YELLOW, Style
+from cli_kit.colour import BOLD, GREEN, GREY, RED, RESET, YELLOW, Style
 
-from claude_sessions import listing
-from claude_sessions.listing import Session
+from claude_sessions import listing, subagents
+from claude_sessions.listing import Session, Subagent
 from claude_sessions.registry import Entry
+from claude_sessions.subagents import Meta
 from claude_sessions.transcript import UNKNOWN, Transcript
 
 NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
@@ -31,6 +32,8 @@ TRANSCRIPT = Transcript(
     model="claude-opus-5-5",
     context_tokens=52_003,
     last_activity=NOW - timedelta(minutes=5),
+    ended=False,
+    subagents_stopped={},
 )
 SESSION = Session(
     status="idle",
@@ -41,11 +44,22 @@ SESSION = Session(
     title="Fixing the login form",
     user_named=False,
     last_active=NOW - timedelta(minutes=5),
+    subagents=(),
 )
 
 
 def test_a_session_is_titled_by_claude_and_found_where_it_last_worked():
-    assert listing.session(ENTRY, TRANSCRIPT, "main", "/home/me") == SESSION
+    assert listing.session(ENTRY, TRANSCRIPT, "main", "/home/me", []) == SESSION
+
+
+HELPER = Subagent(
+    location="~/projects/app/src",
+    branch="main",
+    model="claude-sonnet-5-5",
+    context_tokens=9_000,
+    title="Find the callers",
+    last_active=NOW - timedelta(minutes=1),
+)
 
 
 def test_its_directory_is_where_it_last_worked_else_where_it_started():
@@ -55,18 +69,18 @@ def test_its_directory_is_where_it_last_worked_else_where_it_started():
 
 def test_a_name_you_gave_the_session_is_its_title():
     entry = replace(ENTRY, name="list sessions", named_by="user")
-    session = listing.session(entry, TRANSCRIPT, "main", "/home/me")
+    session = listing.session(entry, TRANSCRIPT, "main", "/home/me", [])
     assert (session.title, session.user_named) == ("list sessions", True)
 
 
 def test_a_name_claude_code_gave_it_is_its_title_but_not_yours():
     entry = replace(ENTRY, name="Assess PHP", named_by="auto")
-    session = listing.session(entry, TRANSCRIPT, "main", "/home/me")
+    session = listing.session(entry, TRANSCRIPT, "main", "/home/me", [])
     assert (session.title, session.user_named) == ("Assess PHP", False)
 
 
 def test_without_a_transcript_it_is_where_it_started_and_named_after_its_directory():
-    session = listing.session(ENTRY, UNKNOWN, None, "/home/me")
+    session = listing.session(ENTRY, UNKNOWN, None, "/home/me", [])
     assert session == Session(
         status="idle",
         location="~/projects/app",
@@ -76,22 +90,23 @@ def test_without_a_transcript_it_is_where_it_started_and_named_after_its_directo
         title="app-86",
         user_named=False,
         last_active=NOW - timedelta(hours=3),
+        subagents=(),
     )
 
 
 def test_a_status_change_after_its_latest_message_is_its_latest_activity():
     entry = replace(ENTRY, updated=NOW - timedelta(minutes=1))
-    assert listing.session(entry, TRANSCRIPT, "main", "/home/me").last_active == entry.updated
+    assert listing.session(entry, TRANSCRIPT, "main", "/home/me", []).last_active == entry.updated
 
 
 def test_a_directory_outside_home_is_shown_in_full():
     entry = replace(ENTRY, cwd="/srv/app")
-    assert listing.session(entry, UNKNOWN, None, "/home/me").location == "/srv/app"
+    assert listing.session(entry, UNKNOWN, None, "/home/me", []).location == "/srv/app"
 
 
 def test_a_directory_beside_home_with_the_same_prefix_is_not_in_it():
     entry = replace(ENTRY, cwd="/home/meg/app")
-    assert listing.session(entry, UNKNOWN, None, "/home/me").location == "/home/meg/app"
+    assert listing.session(entry, UNKNOWN, None, "/home/me", []).location == "/home/meg/app"
 
 
 def test_sessions_needing_you_come_first_then_working_then_the_most_recently_active():
@@ -242,3 +257,68 @@ def test_on_a_screen_two_rows_high_only_the_count_of_lines_fits_above_the_summar
 def test_on_a_screen_one_row_high_only_the_summary_shows():
     assert listing.fitting(1, 1) == 0
     assert listing.screen([], 1, "1 session.", 1) == ["1 session."]
+
+
+def test_a_subagent_is_titled_by_what_it_was_asked_to_do_and_found_where_it_last_worked():
+    found = subagents.Subagent(
+        "a1",
+        Meta("Find the callers", background=False),
+        replace(
+            TRANSCRIPT,
+            cwd="/home/me/projects/app/.claude/worktrees/a1",
+            model="claude-sonnet-5-5",
+            context_tokens=9_000,
+        ),
+    )
+    assert listing.subagent_directory(found, "/home/me/projects/app") == (
+        "/home/me/projects/app/.claude/worktrees/a1"
+    )
+    assert listing.subagent(found, "/home/me/projects/app", "worktree-a1", "/home/me") == Subagent(
+        location="~/projects/app/.claude/worktrees/a1",
+        branch="worktree-a1",
+        model="claude-sonnet-5-5",
+        context_tokens=9_000,
+        title="Find the callers",
+        last_active=NOW - timedelta(minutes=5),
+    )
+
+
+def test_a_subagent_that_hasnt_said_where_it_is_works_where_its_session_does():
+    found = subagents.Subagent("a1", Meta(None, background=True), UNKNOWN)
+    assert listing.subagent_directory(found, "/home/me/projects/app") == "/home/me/projects/app"
+    assert listing.subagent(found, "/home/me/projects/app", None, "/home/me").title == "subagent"
+
+
+def test_a_sessions_subagents_are_listed_the_most_recently_active_first():
+    older = replace(HELPER, title="older", last_active=NOW - timedelta(minutes=9))
+    session = listing.session(ENTRY, TRANSCRIPT, "main", "/home/me", [older, HELPER])
+    assert session.subagents == (HELPER, older)
+
+
+def test_each_session_is_followed_by_its_subagents():
+    other = replace(SESSION, title="other")
+    with_helper = replace(SESSION, subagents=(HELPER,))
+    assert listing.rows([with_helper, other]) == [with_helper, HELPER, other]
+
+
+def test_a_subagent_is_a_busy_line_under_its_session():
+    assert listing.render([SESSION, HELPER], NOW, PLAIN, None) == [
+        "idle  5m  opus-5-5    52k  Fixing the login form  ~/projects/app/src  main",
+        "busy  1m  sonnet-5-5   9k  ↳ Find the callers     ~/projects/app/src  main",
+    ]
+
+
+def test_the_mark_of_a_subagent_is_grey_and_its_title_plain():
+    lines = listing.render([SESSION, HELPER], NOW, Style(enabled=True), None)
+    assert f"  {GREY}↳ {RESET}Find the callers  " in lines[1]
+    plain = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in lines]
+    assert plain == listing.render([SESSION, HELPER], NOW, PLAIN, None)
+
+
+def test_a_session_with_subagents_running_is_active_whatever_its_own_status():
+    with_helper = replace(SESSION, subagents=(HELPER,))
+    assert listing.active([SESSION, with_helper]) == [with_helper]
+
+
+def test_subagents_arent_counted_as_sessions():
+    assert listing.count([replace(SESSION, subagents=(HELPER,))]) == "1 session: 1 idle."

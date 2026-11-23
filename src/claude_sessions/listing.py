@@ -4,10 +4,11 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import final
+from typing import assert_never, final
 
 from cli_kit.colour import BOLD, GREEN, GREY, RED, YELLOW, Style
 
+from claude_sessions import subagents
 from claude_sessions.registry import Entry
 from claude_sessions.transcript import Transcript
 
@@ -15,6 +16,10 @@ from claude_sessions.transcript import Transcript
 _ORDER = ("waiting", "busy", "idle")
 _ACTIVE = ("waiting", "busy")
 _UNKNOWN = "unknown"
+# A subagent listed is running; only its session can be waiting for you.
+_SUBAGENT_STATUS = "busy"
+_SUBAGENT_MARK = "↳ "
+_SUBAGENT_TITLE = "subagent"
 _GAP = "  "
 # Columns, by position on the line.
 _STATUS, _CONTEXT, _TITLE = 0, 3, 4
@@ -30,6 +35,17 @@ _CONTEXT_RESTART = 150_000
 
 @final
 @dataclass(frozen=True)
+class Subagent:
+    location: str
+    branch: str | None
+    model: str | None
+    context_tokens: int | None
+    title: str
+    last_active: datetime | None
+
+
+@final
+@dataclass(frozen=True)
 class Session:
     status: str | None
     location: str
@@ -39,6 +55,12 @@ class Session:
     title: str
     user_named: bool
     last_active: datetime | None
+    subagents: tuple[Subagent, ...]
+    """Its subagents still running, the most recently active first."""
+
+
+type Row = Session | Subagent
+"""A line of the list: a session, or one of its subagents under it."""
 
 
 def directory(entry: Entry, transcript: Transcript) -> str | None:
@@ -53,8 +75,15 @@ def title(entry: Entry, transcript: Transcript) -> str:
     return named or transcript.ai_title or entry.name or "?"
 
 
-def session(entry: Entry, transcript: Transcript, branch: str | None, home: str) -> Session:
-    """A session as listed: in its directory, on branch, under its title."""
+def session(
+    entry: Entry,
+    transcript: Transcript,
+    branch: str | None,
+    home: str,
+    running: Sequence[Subagent],
+) -> Session:
+    """A session as listed: in its directory, on branch, under its title, with the subagents it
+    has running."""
     times = [t for t in (transcript.last_activity, entry.updated) if t is not None]
     return Session(
         status=entry.status,
@@ -65,42 +94,63 @@ def session(entry: Entry, transcript: Transcript, branch: str | None, home: str)
         title=title(entry, transcript),
         user_named=entry.named_by == "user",
         last_active=max(times, default=None),
+        subagents=tuple(_by_recency(running)),
+    )
+
+
+def subagent_directory(found: subagents.Subagent, session_directory: str | None) -> str | None:
+    """The directory the subagent last worked in, such as a worktree of its own, else its
+    session's."""
+    return found.transcript.cwd or session_directory
+
+
+def subagent(
+    found: subagents.Subagent, session_directory: str | None, branch: str | None, home: str
+) -> Subagent:
+    """A subagent as listed: in its directory, on branch, under what it was asked to do."""
+    return Subagent(
+        location=from_home(subagent_directory(found, session_directory) or "?", home),
+        branch=branch,
+        model=found.transcript.model,
+        context_tokens=found.transcript.context_tokens,
+        title=found.meta.title or _SUBAGENT_TITLE,
+        last_active=found.transcript.last_activity,
     )
 
 
 def ordered(sessions: Sequence[Session]) -> list[Session]:
     """Waiting for you, then busy, then idle, then any other status; within each, the most
     recently active first."""
-    by_recency = sorted(
-        sessions, key=lambda s: s.last_active.timestamp() if s.last_active else 0, reverse=True
-    )
-    return sorted(by_recency, key=lambda s: _rank(s.status))
+    return sorted(_by_recency(sessions), key=lambda s: _rank(s.status))
 
 
 def active(sessions: Sequence[Session]) -> list[Session]:
-    """The sessions waiting for you or busy."""
-    return [s for s in sessions if s.status in _ACTIVE]
+    """The sessions waiting for you or busy, or with subagents running."""
+    return [s for s in sessions if s.status in _ACTIVE or s.subagents]
 
 
-def render(
-    sessions: Sequence[Session], now: datetime, colour: Style, width: int | None
-) -> list[str]:
-    """A line for each session, in aligned columns: status, how long since it was last active,
-    model, context used, title, where and branch. Where is cut from the left to no fewer than
-    _PROJECT_MIN characters, as far as keeps different places apart. With a width, the titles are
-    cut so each line fits it."""
-    projects = _abbreviated([s.location for s in sessions], _PROJECT_MIN)
+def rows(sessions: Sequence[Session]) -> list[Row]:
+    """The lines of the list: each session, followed by its subagents."""
+    return [row for s in sessions for row in (s, *s.subagents)]
+
+
+def render(rows: Sequence[Row], now: datetime, colour: Style, width: int | None) -> list[str]:
+    """A line for each row, in aligned columns: status, how long since it was last active,
+    model, context used, title, where and branch. A subagent is marked as one under its session's
+    title. Where is cut from the left to no fewer than _PROJECT_MIN characters, as far as keeps
+    different places apart. With a width, the titles are cut so each line fits it."""
+    projects = _abbreviated([r.location for r in rows], _PROJECT_MIN)
     cells = [
         [
-            s.status or _UNKNOWN,
-            age(s.last_active, now),
-            (s.model or "").removeprefix("claude-"),
-            _tokens(s.context_tokens),
-            s.title,
+            _status(r),
+            age(r.last_active, now),
+            (r.model or "").removeprefix("claude-"),
+            _tokens(r.context_tokens),
+            _title(r),
             project,
-            s.branch or "",
+            r.branch or "",
         ]
-        for s, project in zip(sessions, projects, strict=True)
+        for r, project in zip(rows, projects, strict=True)
     ]
     # A column empty on every line, such as branch when no session is in a repository, is left out.
     shown = [i for i in range(_COLUMNS) if any(row[i] for row in cells)]
@@ -109,19 +159,20 @@ def render(
         others = sum(widths[i] for i in shown if i != _TITLE) + len(_GAP) * (len(shown) - 1)
         widths[_TITLE] = min(widths[_TITLE], max(width - others, 1))
     lines = []
-    for s, row in zip(sessions, cells, strict=True):
+    for r, row in zip(rows, cells, strict=True):
         row[_TITLE] = _fit(row[_TITLE], widths[_TITLE])
         styles = {
             _STATUS: _STATUS_COLOUR.get(row[_STATUS], ""),
-            _CONTEXT: _context_colour(s.context_tokens),
-            _TITLE: BOLD if s.user_named else "",
+            _CONTEXT: _context_colour(r.context_tokens),
         }
+        cells_shown = [
+            _title_cell(r, row[i], widths[i], colour)
+            if i == _TITLE
+            else _cell(row[i], widths[i], i == _CONTEXT, colour, styles.get(i, ""))
+            for i in shown
+        ]
         # Stripped, so a line doesn't end in the padding of its last columns.
-        lines.append(
-            _GAP.join(
-                _cell(row[i], widths[i], i == _CONTEXT, colour, styles.get(i, "")) for i in shown
-            ).rstrip()
-        )
+        lines.append(_GAP.join(cells_shown).rstrip())
     return lines
 
 
@@ -168,6 +219,33 @@ def count(sessions: Sequence[Session]) -> str:
 _STATUS_COLOUR = {"waiting": YELLOW, "busy": GREEN, "idle": GREY}
 
 
+def _status(row: Row) -> str:
+    match row:
+        case Session():
+            return row.status or _UNKNOWN
+        case Subagent():
+            return _SUBAGENT_STATUS
+        case _:
+            assert_never(row)
+
+
+def _title(row: Row) -> str:
+    match row:
+        case Session():
+            return row.title
+        case Subagent():
+            return _SUBAGENT_MARK + row.title
+        case _:
+            assert_never(row)
+
+
+def _by_recency[T: (Session, Subagent)](rows: Sequence[T]) -> list[T]:
+    """rows, the most recently active first."""
+    return sorted(
+        rows, key=lambda r: r.last_active.timestamp() if r.last_active else 0, reverse=True
+    )
+
+
 def _rank(status: str | None) -> tuple[int, str]:
     if status in _ORDER:
         return _ORDER.index(status), ""
@@ -211,6 +289,23 @@ def _cell(text: str, width: int, right: bool, colour: Style, code: str) -> str:
     padding = " " * (width - len(text))
     styled = colour(code, text) if code else text
     return padding + styled if right else styled + padding
+
+
+def _title_cell(row: Row, text: str, width: int, colour: Style) -> str:
+    """The row's title, text as fitted, padded to width: bold when you named the session, and
+    a subagent's mark grey, as long as it's not been cut away."""
+    match row:
+        case Session():
+            return _cell(text, width, False, colour, BOLD if row.user_named else "")
+        case Subagent() if text.startswith(_SUBAGENT_MARK):
+            rest = _cell(
+                text.removeprefix(_SUBAGENT_MARK), width - len(_SUBAGENT_MARK), False, colour, ""
+            )
+            return colour(GREY, _SUBAGENT_MARK) + rest
+        case Subagent():
+            return _cell(text, width, False, colour, "")
+        case _:
+            assert_never(row)
 
 
 def _context_colour(tokens: int | None) -> str:

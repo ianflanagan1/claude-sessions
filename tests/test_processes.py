@@ -53,3 +53,14 @@ def test_terminating_ends_the_process():
     finally:
         process.kill()
     assert not processes.terminate(process.pid)
+
+
+def test_when_a_process_started_is_read_in_this_machines_time_zone():
+    assert processes.started_at("Sun Nov  1 20:33:39 2026") == (
+        datetime(2026, 11, 1, 20, 33, 39).astimezone()
+    )
+
+
+def test_a_start_that_isnt_a_time_is_none():
+    assert processes.started_at("yesterday") is None
+    assert processes.started_at(None) is None
