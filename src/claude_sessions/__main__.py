@@ -10,15 +10,16 @@ The title is the name you gave the session, in bold, or one Claude Code gave it;
 title Claude gave the conversation, which it updates as the conversation moves on.
 
 On a terminal the list stays on screen, redrawn every 2 seconds, until you press Ctrl-C. Piped or
-captured, it's printed once.
+captured, it's printed once. `claude-sessions <path>` lists only the sessions working in path or
+below it: `claude-sessions .` those working here.
 
-`claude-sessions close-archived` ends the sessions you've archived in VS Code or Cursor's Claude
+`claude-sessions --close-archived` ends the sessions you've archived in VS Code or Cursor's Claude
 Code panel: archiving there hides a session but leaves it running. Only idle ones are closed,
 never one busy or waiting for you, nor one you've since resumed in a terminal, nor one whose
 process has run for under a minute. Each closed
 session's history stays on disk, to open again from the editor's list of past sessions.
 
-`claude-sessions changes [<path>]` lists what's uncommitted in the git repository at path, here by
+`claude-sessions --changes [<path>]` lists what's uncommitted in the git repository at path, here by
 default, and which running sessions edited each file since it was last committed, so you, or a
 tool such as one that commits, can leave alone what a session is still working on. A shell command
 can change any file without naming it, so the sessions that ran commands in the repository since
@@ -70,38 +71,58 @@ _PLATFORMS = ("darwin", "linux")
 def main(argv: list[str] | None = None) -> int:
     parser = cli.ArgumentParser(prog="claude-sessions", description=__doc__)
     parser.add_argument(
+        "path",
+        nargs="?",
+        help="list only sessions working in this directory or below it, . for here; with "
+        "--changes, a directory in the repository, here by default",
+    )
+    parser.add_argument(
         "-a",
         "--active",
         action="store_true",
         help="list only sessions waiting for you or busy, or with subagents running",
     )
-    commands = parser.add_subparsers(dest="command", metavar="<command>")
-    commands.add_parser(
-        "close-archived",
-        help="end the idle sessions archived in VS Code or Cursor",
-        description="End the idle sessions archived in VS Code or Cursor's Claude Code panel.",
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--changes",
+        action="store_true",
+        help="which running sessions edited the uncommitted files in the repository at path",
     )
-    changes = commands.add_parser(
-        "changes",
-        help="which running sessions edited a repository's uncommitted files",
-        description="List what's uncommitted in a git repository, and which running sessions "
-        "edited each file since it was last committed, or ran commands in the repository.",
+    mode.add_argument(
+        "--close-archived",
+        action="store_true",
+        help="end the idle sessions archived in VS Code or Cursor's Claude Code panel",
     )
-    changes.add_argument(
-        "path", nargs="?", default=".", help="a directory in the repository; here by default"
-    )
-    changes.add_argument(
-        "--json", action="store_true", help="print it as JSON, alone, for other tools to read"
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="with --changes, print it as JSON, alone, for other tools to read",
     )
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
-    if args.command == "close-archived":
-        return cli.finish("claude-sessions close-archived", _close_archived)
-    if args.command == "changes" and args.json:
-        return _json("claude-sessions changes", lambda: attribution.as_json(_attribute(args.path)))
-    if args.command == "changes":
-        return cli.finish("claude-sessions changes", lambda: _show_changes(args.path))
+    if args.json and not args.changes:
+        parser.error("--json goes with --changes")
+    if args.active and (args.changes or args.close_archived):
+        parser.error("--active goes only with the list of sessions")
+    if args.close_archived and args.path is not None:
+        parser.error("--close-archived takes no path")
+    if args.close_archived:
+        return cli.finish("claude-sessions --close-archived", _close_archived)
+    if args.changes:
+        repo = args.path or "."
+        if args.json:
+            return _json("claude-sessions --changes", lambda: attribution.as_json(_attribute(repo)))
+        return cli.finish("claude-sessions --changes", lambda: _show_changes(repo))
     show = _watch if sys.stdout.isatty() else _print
-    return cli.finish("claude-sessions", lambda: show(args.active))
+    return cli.finish("claude-sessions", lambda: show(args.active, _root(args.path)))
+
+
+def _root(path: str | None) -> str | None:
+    """The directory path names, symbolic links resolved, as each session's is to compare."""
+    if path is None:
+        return None
+    if not os.path.isdir(path):
+        raise outcome.Precondition(f"{path} isn't a directory.")
+    return os.path.realpath(path)
 
 
 def _close_archived() -> outcome.Done | outcome.NothingToDo:
@@ -200,16 +221,16 @@ _CLEAR_LINE_END = "\x1b[K"
 _CLEAR_BELOW = "\x1b[J"
 
 
-def _print(only_active: bool) -> outcome.NothingToDo:
+def _print(only_active: bool, root: str | None) -> outcome.NothingToDo:
     _check_platform()
-    shown, sessions = _gather(only_active)
+    shown, sessions = _gather(only_active, root)
     rows = listing.rows(shown)
     for line in listing.render(rows, datetime.now(UTC), Style.for_stream(sys.stdout), None):
         print(line)
     return outcome.NothingToDo(listing.count(sessions))
 
 
-def _watch(only_active: bool) -> outcome.NothingToDo:
+def _watch(only_active: bool, root: str | None) -> outcome.NothingToDo:
     """Redraws the list on the alternate screen until Ctrl-C or SIGTERM, then leaves the screen
     as it was, for cli.finish to print the last count under."""
     _check_platform()
@@ -219,7 +240,7 @@ def _watch(only_active: bool) -> outcome.NothingToDo:
     sys.stdout.write(_ENTER)
     try:
         while True:
-            shown, sessions = _gather(only_active)
+            shown, sessions = _gather(only_active, root)
             rows = listing.rows(shown)
             summary = listing.count(sessions)
             size = shutil.get_terminal_size()
@@ -245,11 +266,15 @@ def _interrupt(signum: int, frame: object) -> None:
     raise KeyboardInterrupt
 
 
-def _gather(only_active: bool) -> tuple[list[listing.Session], list[listing.Session]]:
-    """The sessions to show, in order, and every session running, to count."""
+def _gather(
+    only_active: bool, root: str | None
+) -> tuple[list[listing.Session], list[listing.Session]]:
+    """The sessions to show, in order, and every session running, to count. With a root, only
+    those working in it or below it are shown."""
     home = Path.home()
     claude = home / ".claude"
     sessions = []
+    placed = []
     branches: dict[str, str | None] = {}  # Many sessions share a directory; ask git once for each.
 
     def branch(directory: str | None) -> str | None:
@@ -270,8 +295,13 @@ def _gather(only_active: bool) -> tuple[list[listing.Session], list[listing.Sess
             )
             for s in subagents.running(found, entry.status, told, since)
         ]
-        sessions.append(listing.session(entry, told, branch(directory), str(home), running))
-    shown = listing.ordered(listing.active(sessions) if only_active else sessions)
+        listed = listing.session(entry, told, branch(directory), str(home), running)
+        sessions.append(listed)
+        if root is None or (
+            directory is not None and listing.within(os.path.realpath(directory), root)
+        ):
+            placed.append(listed)
+    shown = listing.ordered(listing.active(placed) if only_active else placed)
     return shown, sessions
 
 

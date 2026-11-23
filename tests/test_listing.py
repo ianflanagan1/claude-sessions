@@ -322,3 +322,19 @@ def test_a_session_with_subagents_running_is_active_whatever_its_own_status():
 
 def test_subagents_arent_counted_as_sessions():
     assert listing.count([replace(SESSION, subagents=(HELPER,))]) == "1 session: 1 idle."
+
+
+def test_a_directory_is_within_itself():
+    assert listing.within("/home/me/app", "/home/me/app")
+
+
+def test_a_directory_below_another_is_within_it():
+    assert listing.within("/home/me/app/src", "/home/me/app")
+
+
+def test_a_directory_beside_another_with_the_same_prefix_is_not_within_it():
+    assert not listing.within("/home/me/apple", "/home/me/app")
+
+
+def test_every_directory_is_within_the_root():
+    assert listing.within("/home/me", "/")

@@ -129,6 +129,11 @@ def active(sessions: Sequence[Session]) -> list[Session]:
     return [s for s in sessions if s.status in _ACTIVE or s.subagents]
 
 
+def within(path: str, root: str) -> bool:
+    """Whether path is root or a directory below it."""
+    return path == root or path.startswith(root.rstrip("/") + "/")
+
+
 def rows(sessions: Sequence[Session]) -> list[Row]:
     """The lines of the list: each session, followed by its subagents."""
     return [row for s in sessions for row in (s, *s.subagents)]

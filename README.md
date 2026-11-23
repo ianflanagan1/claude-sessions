@@ -14,6 +14,8 @@ idle     29m  opus-5-5   33k  Named parameters across TypeScript, Java, C#, Go  
 
 Each line is a session's status, how long since it was last active, its model, how much of its context it has used, its title, the directory it last worked in, and the branch checked out there. A directory longer than 35 characters is cut from the left, but no further than keeps different directories apart. Sessions waiting for you come first, then busy ones, then idle ones, each most recently active first. `--active` lists only those waiting or busy, or with subagents running.
 
+`claude-sessions <path>` lists only the sessions working in that directory or below it, so `claude-sessions .` lists those working here. The path can be relative or absolute. A session's directory is the one shown, where it last worked, and both are compared with symbolic links resolved. It combines with `--active`, and the count is still of every session running.
+
 A session's subagents that are still running are listed under it, most recently active first, as `busy`, titled `↳` and what they were asked to do, in the directory each last worked in, such as a worktree of its own:
 
 ```
@@ -35,7 +37,7 @@ Built on [cli-kit](../cli-kit).
 
 ## Closing archived sessions
 
-Archiving a session in VS Code or Cursor's Claude Code panel hides it from the list but leaves its process running, holding a couple of hundred MB. `claude-sessions close-archived` ends them, with SIGTERM, and lists each one it closed. Each session's history stays in its transcript, to open again from the editor's past sessions.
+Archiving a session in VS Code or Cursor's Claude Code panel hides it from the list but leaves its process running, holding a couple of hundred MB. `claude-sessions --close-archived` ends them, with SIGTERM, and lists each one it closed. Each session's history stays in its transcript, to open again from the editor's past sessions.
 
 It closes a session only when all of these hold, and keeps it otherwise:
 
@@ -49,10 +51,10 @@ The editors keep what's archived in their own state, `User/globalStorage/state.v
 
 ## Who changed what
 
-`claude-sessions changes [<path>]` lists what's uncommitted in the git repository at path, here by default, and which running sessions edited each file since it was last committed. Use it before committing, or before changing files a session may still be working on.
+`claude-sessions --changes [<path>]` lists what's uncommitted in the git repository at path, here by default, and which running sessions edited each file since it was last committed. Use it before committing, or before changing files a session may still be working on.
 
 ```
-$ claude-sessions changes
+$ claude-sessions --changes
  M src/listing.py  Fix the listing (busy)
 ?? notes.txt       no running session
 Commands run here since the last commit: Fix the listing (busy)
@@ -79,7 +81,7 @@ Claude Code's own files, read directly:
 | When a session's process started, to leave out subagents of an earlier one | `procStart` in `~/.claude/sessions/<pid>.json` |
 | What each session edited, and where it ran commands | The tool calls in its transcript, and its subagents' in `~/.claude/projects/<dir>/<session id>/subagents/` |
 | Which sessions are archived | Each editor's `state.vscdb`; see [Closing archived sessions](#closing-archived-sessions) |
-| Branch, uncommitted files, when each was last committed | `git` in the session's directory, or the repository given to `changes`. The transcript's own `gitBranch` is the branch it started on, so isn't used |
+| Branch, uncommitted files, when each was last committed | `git` in the session's directory, or the repository given to `--changes`. The transcript's own `gitBranch` is the branch it started on, so isn't used |
 
 These formats are Claude Code's and may change. A record or field it can't read is shown as unknown rather than failing. `claude agents --json` lists the same sessions, but without who named them or the transcript's details.
 

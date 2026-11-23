@@ -31,10 +31,22 @@ def launch_from(home: Path, session_id: str, *args: str) -> subprocess.Completed
     return subprocess.run([BIN, *args], capture_output=True, text=True, env=env)
 
 
+def launch_in(home: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """claude-sessions run with cwd as its current directory."""
+    env = os.environ | {"HOME": str(home), "NO_COLOR": "1"}
+    env.pop("XDG_CONFIG_HOME", None)
+    env.pop(OWN_SESSION, None)
+    return subprocess.run([BIN, *args], capture_output=True, text=True, env=env, cwd=cwd)
+
+
 def session(home: Path, pid: int, session_id: str, status: str, title: str) -> None:
+    session_in(home, home, pid, session_id, status, title)
+
+
+def session_in(home: Path, cwd: Path, pid: int, session_id: str, status: str, title: str) -> None:
     sessions = home / ".claude" / "sessions"
     sessions.mkdir(parents=True, exist_ok=True)
-    record = {"pid": pid, "sessionId": session_id, "cwd": str(home), "status": status}
+    record = {"pid": pid, "sessionId": session_id, "cwd": str(cwd), "status": status}
     (sessions / f"{pid}.json").write_text(json.dumps(record))
     transcripts = home / ".claude" / "projects" / "-home"
     transcripts.mkdir(parents=True, exist_ok=True)
@@ -72,6 +84,58 @@ def test_active_lists_only_the_sessions_waiting_or_busy_but_counts_them_all(tmp_
     assert len(lines) == 2
     assert "Asking" in lines[0]
     assert lines[1] == "➖ 2 sessions: 1 waiting, 1 idle."
+
+
+def test_a_path_lists_only_the_sessions_working_in_that_directory_or_below_it(tmp_path: Path):
+    app = tmp_path / "projects" / "app"
+    (app / "src").mkdir(parents=True)
+    (tmp_path / "projects" / "apple").mkdir()
+    session_in(tmp_path, app / "src", os.getpid(), "s1", "idle", "In the app")
+    session_in(tmp_path, tmp_path / "projects" / "apple", os.getppid(), "s2", "busy", "Beside it")
+    result = launch(tmp_path, str(app))
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    assert len(lines) == 2
+    assert "In the app" in lines[0]
+    assert lines[1] == "➖ 2 sessions: 1 busy, 1 idle."
+
+
+def test_a_relative_path_is_from_the_current_directory(tmp_path: Path):
+    app = tmp_path / "app"
+    app.mkdir()
+    session_in(tmp_path, app, os.getpid(), "s1", "idle", "In the app")
+    session(tmp_path, os.getppid(), "s2", "busy", "At home")
+    lines = launch_in(tmp_path, app, ".").stdout.splitlines()
+    assert len(lines) == 2
+    assert "In the app" in lines[0]
+
+
+def test_a_path_that_isnt_a_directory_says_so(tmp_path: Path):
+    result = launch(tmp_path, str(tmp_path / "missing"))
+    assert result.returncode != 0
+    assert "isn't a directory" in result.stdout + result.stderr
+
+
+def test_changes_and_close_archived_cant_be_asked_for_together(tmp_path: Path):
+    assert launch(tmp_path, "--changes", "--close-archived").returncode == 2
+
+
+def test_json_is_only_for_changes(tmp_path: Path):
+    result = launch(tmp_path, "--json")
+    assert result.returncode == 2
+    assert "--json" in result.stderr
+
+
+def test_active_is_only_for_the_list(tmp_path: Path):
+    result = launch(tmp_path, "--changes", "--active")
+    assert result.returncode == 2
+    assert "--active" in result.stderr
+
+
+def test_close_archived_takes_no_path(tmp_path: Path):
+    result = launch(tmp_path, "--close-archived", ".")
+    assert result.returncode == 2
+    assert "path" in result.stderr
 
 
 def test_with_no_sessions_it_says_so(tmp_path: Path):
@@ -141,7 +205,7 @@ def test_close_archived_keeps_an_archived_session_whose_process_has_just_started
     try:
         editor_session(tmp_path, process.pid, "s1", "idle")
         archive_in_editor(tmp_path, ["s1"])
-        result = launch(tmp_path, "close-archived")
+        result = launch(tmp_path, "--close-archived")
         assert result.returncode == 0, result.stderr
         assert result.stdout == "➖ No archived sessions to close.\n"
         assert process.poll() is None
@@ -153,7 +217,7 @@ def test_close_archived_with_no_editor_state_closes_nothing(tmp_path: Path):
     process = sleeper()
     try:
         editor_session(tmp_path, process.pid, "s1", "idle")
-        result = launch(tmp_path, "close-archived")
+        result = launch(tmp_path, "--close-archived")
         assert result.stdout == "➖ No archived sessions to close.\n"
         assert process.poll() is None
     finally:
@@ -204,7 +268,7 @@ def test_changes_tells_which_running_session_edited_each_uncommitted_file(tmp_pa
     (repo / "notes.txt").write_text("mine")
     session(tmp_path, os.getpid(), "s1", "busy", "Fixing the login form")
     edit(tmp_path, "s1", repo / "a.py")
-    result = launch_from(tmp_path, "s1", "changes", str(repo), "--json")
+    result = launch_from(tmp_path, "s1", "--changes", str(repo), "--json")
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
         "repo": str(repo),
@@ -234,7 +298,7 @@ def test_changes_lists_each_file_with_who_edited_it(tmp_path: Path):
     (repo / "a.py").write_text("changed")
     session(tmp_path, os.getpid(), "s1", "busy", "Fixing the login form")
     edit(tmp_path, "s1", repo / "a.py")
-    result = launch(tmp_path, "changes", str(repo / "src"))
+    result = launch(tmp_path, "--changes", str(repo / "src"))
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
         " M a.py  Fixing the login form (busy)",
@@ -242,8 +306,19 @@ def test_changes_lists_each_file_with_who_edited_it(tmp_path: Path):
     ]
 
 
+def test_changes_without_a_path_is_of_the_repository_here(tmp_path: Path):
+    repo = committed_repository(tmp_path / "repo")
+    (repo / "a.py").write_text("changed")
+    result = launch_in(tmp_path, repo / "src", "--changes")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        " M a.py  no running session",
+        "➖ 1 file uncommitted in ~/repo, 0 edited by running sessions.",
+    ]
+
+
 def test_changes_outside_a_repository_says_so(tmp_path: Path):
-    result = launch(tmp_path, "changes", str(tmp_path), "--json")
+    result = launch(tmp_path, "--changes", str(tmp_path), "--json")
     assert result.returncode == 1
     assert result.stdout == ""
     assert result.stderr == f"⚠️ {tmp_path} isn't in a git repository.\n"
