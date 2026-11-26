@@ -17,7 +17,8 @@ busy-archived.
 On a terminal the list stays on screen, redrawn every 2 seconds, until you press Ctrl-C, and the
 archived sessions --close-archived would close are closed before each redraw. Piped or captured,
 it's printed once, and closes nothing. `claude-sessions <path>` lists, counts and closes only the
-sessions working in path or below it: `claude-sessions .` those working here.
+sessions working in path or below it: `claude-sessions .` those working here. Each directory is
+then shown from path, and . for path itself; when every line is in path, it's left out.
 
 `claude-sessions --close-archived [<path>]` ends the sessions you've archived in VS Code or
 Cursor's Claude Code panel, only those working in path or below it when given one: archiving
@@ -136,6 +137,13 @@ def _in_scope(directory: str | None, root: str | None) -> bool:
     """Whether a session working in directory is one to list, count and close, its symbolic links
     resolved as root's are."""
     return listing.in_scope(None if directory is None else os.path.realpath(directory), root)
+
+
+def _location(directory: str | None, root: str | None, home: Path) -> str:
+    """Where a row working in directory is listed, its symbolic links resolved as root's are to
+    compare with root."""
+    resolved = None if directory is None else os.path.realpath(directory)
+    return listing.location(directory, resolved, root, str(home))
 
 
 def _place(root: str | None, home: Path) -> str | None:
@@ -339,16 +347,15 @@ def _gather(
         directory = listing.directory(entry, told)
         since = processes.started_at(entry.process_started)
         found = subagents.read(claude / "projects", entry.session_id, since)
-        running = [
-            listing.subagent(
-                s, directory, branch(listing.subagent_directory(s, directory)), str(home)
-            )
-            for s in subagents.running(found, entry.status, told, since)
-        ]
+        running = []
+        for s in subagents.running(found, entry.status, told, since):
+            where = listing.subagent_directory(s, directory)
+            running.append(listing.subagent(s, _location(where, root, home), branch(where)))
         if _in_scope(directory, root):
             archived = closing.archived_in_editor(entry, hidden)
+            where = _location(directory, root, home)
             placed.append(
-                listing.session(entry, told, branch(directory), str(home), running, archived, now)
+                listing.session(entry, told, where, branch(directory), running, archived, now)
             )
     listed = listing.started(placed)
     shown = listing.ordered(listing.active(listed) if only_active else listed)

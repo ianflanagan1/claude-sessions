@@ -29,6 +29,8 @@ _SUBAGENT_STATUS = "busy"
 _SUBAGENT_MARK = "↳ "
 _SUBAGENT_TITLE = "subagent"
 _GAP = "  "
+# Where a row in the directory listed works, when other rows work below it.
+_HERE = "."
 # Columns, by position on the line.
 _STATUS, _CONTEXT, _TITLE = 0, 3, 4
 _COLUMNS = 7
@@ -58,6 +60,7 @@ class Session:
     status: str | None
     """Claude Code's status for it, or done for _DONE_FOR after it finishes a turn."""
     location: str
+    """Where it works, as location gives it."""
     branch: str | None
     model: str | None
     context_tokens: int | None
@@ -81,6 +84,16 @@ def directory(entry: Entry, transcript: Transcript) -> str | None:
     return transcript.cwd or entry.cwd
 
 
+def location(directory: str | None, resolved: str | None, root: str | None, home: str) -> str:
+    """Where a row works, as listed: below root, its path from root, and empty in root itself,
+    so a list of only the sessions working in root leaves the column out; anywhere else,
+    directory with home written as ~. resolved is directory with its symbolic links resolved, as
+    root's are, to compare with root."""
+    if root is not None and resolved is not None and within(resolved, root):
+        return resolved[len(root.rstrip("/")) :].lstrip("/")
+    return from_home(directory or "?", home)
+
+
 def title(entry: Entry, transcript: Transcript) -> str:
     """The name you or Claude Code gave the session, else the title Claude gave the conversation,
     else the name taken from its directory."""
@@ -91,13 +104,13 @@ def title(entry: Entry, transcript: Transcript) -> str:
 def session(
     entry: Entry,
     transcript: Transcript,
+    location: str,
     branch: str | None,
-    home: str,
     running: Sequence[Subagent],
     archived: bool,
     now: datetime,
 ) -> Session:
-    """A session as listed: in its directory, on branch, under its title, with the subagents it
+    """A session as listed: at location, on branch, under its title, with the subagents it
     has running, and archived or not. It's blank when idle with no prompt or reply in its
     transcript and no subagent running; one busy or waiting has been given its first prompt.
     It's done, as of now, for _DONE_FOR after it goes idle with a turn finished, and no subagent
@@ -105,7 +118,7 @@ def session(
     times = [t for t in (transcript.last_activity, entry.updated) if t is not None]
     return Session(
         status=_DONE if _done(entry, transcript, running, now) else entry.status,
-        location=from_home(directory(entry, transcript) or "?", home),
+        location=location,
         branch=branch,
         model=transcript.model,
         context_tokens=transcript.context_tokens,
@@ -134,12 +147,10 @@ def subagent_directory(found: subagents.Subagent, session_directory: str | None)
     return found.transcript.cwd or session_directory
 
 
-def subagent(
-    found: subagents.Subagent, session_directory: str | None, branch: str | None, home: str
-) -> Subagent:
-    """A subagent as listed: in its directory, on branch, under what it was asked to do."""
+def subagent(found: subagents.Subagent, location: str, branch: str | None) -> Subagent:
+    """A subagent as listed: at location, on branch, under what it was asked to do."""
     return Subagent(
-        location=from_home(subagent_directory(found, session_directory) or "?", home),
+        location=location,
         branch=branch,
         model=found.transcript.model,
         context_tokens=found.transcript.context_tokens,
@@ -185,10 +196,11 @@ def rows(sessions: Sequence[Session]) -> list[Row]:
 def render(rows: Sequence[Row], now: datetime, colour: Style, width: int | None) -> list[str]:
     """A line for each row, in aligned columns: status, ending in -archived for an archived
     session, how long since it was last active, model, context used, title, where and branch.
-    A subagent is marked as one under its session's title. Where is cut from the left to no
-    fewer than _PROJECT_MIN characters, as far as keeps different places apart. With a width,
-    the titles are cut so each line fits it."""
-    projects = _abbreviated([r.location for r in rows], _PROJECT_MIN)
+    A subagent is marked as one under its session's title. Where is _HERE for a row in the
+    directory listed, unless every row is, and cut from the left to no fewer than _PROJECT_MIN
+    characters, as far as keeps different places apart. With a width, the titles are cut so each
+    line fits it."""
+    projects = _abbreviated(_here([r.location for r in rows]), _PROJECT_MIN)
     cells = [
         [
             _status(r),
@@ -346,6 +358,13 @@ def _tokens(n: int | None) -> str:
     if n is None:
         return ""
     return str(n) if n < 1000 else f"{n // 1000}k"
+
+
+def _here(locations: Sequence[str]) -> list[str]:
+    """locations, each empty one, in the directory listed, as _HERE, unless every one is."""
+    if not any(locations):
+        return list(locations)
+    return [loc or _HERE for loc in locations]
 
 
 def _abbreviated(locations: Sequence[str], minimum: int) -> list[str]:

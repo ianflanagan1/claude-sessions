@@ -53,7 +53,9 @@ SESSION = Session(
 
 
 def test_a_session_is_titled_by_claude_and_found_where_it_last_worked():
-    assert listing.session(ENTRY, TRANSCRIPT, "main", "/home/me", [], False, NOW) == SESSION
+    assert (
+        listing.session(ENTRY, TRANSCRIPT, "~/projects/app/src", "main", [], False, NOW) == SESSION
+    )
 
 
 HELPER = Subagent(
@@ -73,18 +75,18 @@ def test_its_directory_is_where_it_last_worked_else_where_it_started():
 
 def test_a_name_you_gave_the_session_is_its_title():
     entry = replace(ENTRY, name="list sessions", named_by="user")
-    session = listing.session(entry, TRANSCRIPT, "main", "/home/me", [], False, NOW)
+    session = listing.session(entry, TRANSCRIPT, "~/projects/app/src", "main", [], False, NOW)
     assert (session.title, session.user_named) == ("list sessions", True)
 
 
 def test_a_name_claude_code_gave_it_is_its_title_but_not_yours():
     entry = replace(ENTRY, name="Assess PHP", named_by="auto")
-    session = listing.session(entry, TRANSCRIPT, "main", "/home/me", [], False, NOW)
+    session = listing.session(entry, TRANSCRIPT, "~/projects/app/src", "main", [], False, NOW)
     assert (session.title, session.user_named) == ("Assess PHP", False)
 
 
 def test_without_a_transcript_it_is_where_it_started_and_named_after_its_directory():
-    session = listing.session(ENTRY, UNKNOWN, None, "/home/me", [], False, NOW)
+    session = listing.session(ENTRY, UNKNOWN, "~/projects/app", None, [], False, NOW)
     assert session == Session(
         status="idle",
         location="~/projects/app",
@@ -102,21 +104,21 @@ def test_without_a_transcript_it_is_where_it_started_and_named_after_its_directo
 
 def test_an_idle_session_with_nothing_said_in_it_is_blank():
     unsaid = replace(TRANSCRIPT, started=False)
-    assert listing.session(ENTRY, unsaid, None, "/home/me", [], False, NOW).blank
+    assert listing.session(ENTRY, unsaid, "~/projects/app", None, [], False, NOW).blank
 
 
 def test_a_session_with_a_prompt_or_reply_in_it_is_not_blank():
-    assert not listing.session(ENTRY, TRANSCRIPT, None, "/home/me", [], False, NOW).blank
+    assert not listing.session(ENTRY, TRANSCRIPT, "~/projects/app/src", None, [], False, NOW).blank
 
 
 def test_a_session_busy_or_waiting_on_its_first_prompt_is_not_blank():
     for status in ("busy", "waiting", None):
         entry = replace(ENTRY, status=status)
-        assert not listing.session(entry, UNKNOWN, None, "/home/me", [], False, NOW).blank
+        assert not listing.session(entry, UNKNOWN, "~/projects/app", None, [], False, NOW).blank
 
 
 def test_a_session_with_subagents_running_is_not_blank():
-    assert not listing.session(ENTRY, UNKNOWN, None, "/home/me", [HELPER], False, NOW).blank
+    assert not listing.session(ENTRY, UNKNOWN, "~/projects/app", None, [HELPER], False, NOW).blank
 
 
 def test_blank_sessions_are_not_listed():
@@ -126,41 +128,50 @@ def test_blank_sessions_are_not_listed():
 
 def test_a_session_idle_for_under_two_minutes_is_done():
     entry = replace(ENTRY, status_changed=NOW - timedelta(seconds=119))
-    assert listing.session(entry, TRANSCRIPT, "main", "/home/me", [], False, NOW) == replace(
-        SESSION, status="done"
-    )
+    assert listing.session(
+        entry, TRANSCRIPT, "~/projects/app/src", "main", [], False, NOW
+    ) == replace(SESSION, status="done")
 
 
 def test_a_session_idle_for_two_minutes_or_more_is_idle():
     entry = replace(ENTRY, status_changed=NOW - timedelta(minutes=2))
-    assert listing.session(entry, TRANSCRIPT, "main", "/home/me", [], False, NOW).status == "idle"
+    assert (
+        listing.session(entry, TRANSCRIPT, "~/projects/app/src", "main", [], False, NOW).status
+        == "idle"
+    )
 
 
 def test_a_session_busy_or_waiting_since_a_moment_ago_is_not_done():
     for status in ("busy", "waiting"):
         entry = replace(ENTRY, status=status, status_changed=NOW - timedelta(seconds=5))
         assert (
-            listing.session(entry, TRANSCRIPT, "main", "/home/me", [], False, NOW).status == status
+            listing.session(entry, TRANSCRIPT, "~/projects/app/src", "main", [], False, NOW).status
+            == status
         )
 
 
 def test_a_session_just_opened_with_nothing_said_in_it_is_not_done():
     entry = replace(ENTRY, status_changed=NOW - timedelta(seconds=5))
     unsaid = replace(TRANSCRIPT, started=False)
-    assert listing.session(entry, unsaid, "main", "/home/me", [], False, NOW).status == "idle"
+    assert listing.session(entry, unsaid, "~/projects/app", "main", [], False, NOW).status == "idle"
 
 
 def test_a_session_whose_subagent_is_still_at_work_is_not_done():
     entry = replace(ENTRY, status_changed=NOW - timedelta(seconds=5))
     assert (
-        listing.session(entry, TRANSCRIPT, "main", "/home/me", [HELPER], False, NOW).status
+        listing.session(
+            entry, TRANSCRIPT, "~/projects/app/src", "main", [HELPER], False, NOW
+        ).status
         == "idle"
     )
 
 
 def test_a_session_whose_status_change_is_unknown_is_not_done():
     entry = replace(ENTRY, status_changed=None)
-    assert listing.session(entry, TRANSCRIPT, "main", "/home/me", [], False, NOW).status == "idle"
+    assert (
+        listing.session(entry, TRANSCRIPT, "~/projects/app/src", "main", [], False, NOW).status
+        == "idle"
+    )
 
 
 def test_done_sessions_come_after_those_busy_and_before_those_idle():
@@ -191,7 +202,7 @@ def test_each_status_has_its_colour():
 
 
 def test_a_session_archived_in_its_editor_is_marked_archived():
-    session = listing.session(ENTRY, TRANSCRIPT, "main", "/home/me", [], True, NOW)
+    session = listing.session(ENTRY, TRANSCRIPT, "~/projects/app/src", "main", [], True, NOW)
     assert session == replace(SESSION, archived=True)
 
 
@@ -240,22 +251,51 @@ def test_an_archived_session_waiting_or_busy_is_active():
 def test_a_status_change_after_its_latest_message_is_its_latest_activity():
     entry = replace(ENTRY, updated=NOW - timedelta(minutes=1))
     assert (
-        listing.session(entry, TRANSCRIPT, "main", "/home/me", [], False, NOW).last_active
+        listing.session(entry, TRANSCRIPT, "~/projects/app/src", "main", [], False, NOW).last_active
         == entry.updated
     )
 
 
+def test_a_directory_in_home_is_shown_from_it():
+    where = "/home/me/projects/app"
+    assert listing.location(where, where, None, "/home/me") == "~/projects/app"
+    assert listing.location("/home/me", "/home/me", None, "/home/me") == "~"
+
+
 def test_a_directory_outside_home_is_shown_in_full():
-    entry = replace(ENTRY, cwd="/srv/app")
-    assert listing.session(entry, UNKNOWN, None, "/home/me", [], False, NOW).location == "/srv/app"
+    assert listing.location("/srv/app", "/srv/app", None, "/home/me") == "/srv/app"
 
 
 def test_a_directory_beside_home_with_the_same_prefix_is_not_in_it():
-    entry = replace(ENTRY, cwd="/home/meg/app")
-    assert (
-        listing.session(entry, UNKNOWN, None, "/home/me", [], False, NOW).location
-        == "/home/meg/app"
-    )
+    assert listing.location("/home/meg/app", "/home/meg/app", None, "/home/me") == "/home/meg/app"
+
+
+def test_an_unknown_directory_is_a_question_mark():
+    assert listing.location(None, None, None, "/home/me") == "?"
+
+
+def test_a_directory_below_the_one_listed_is_shown_from_it():
+    where = "/home/me/projects/app/src"
+    assert listing.location(where, where, "/home/me/projects", "/home/me") == "app/src"
+
+
+def test_the_directory_listed_is_shown_as_nothing():
+    where = "/home/me/projects/app"
+    assert listing.location(where, where, where, "/home/me") == ""
+
+
+def test_a_directory_is_compared_with_the_one_listed_by_its_resolved_path():
+    shown = listing.location("/var/app/src", "/private/var/app/src", "/private/var/app", "/home/me")
+    assert shown == "src"
+
+
+def test_a_directory_outside_the_one_listed_is_shown_from_home():
+    where = "/home/me/projects/apple"
+    assert listing.location(where, where, "/home/me/projects/app", "/home/me") == "~/projects/apple"
+
+
+def test_below_the_root_of_the_filesystem_a_directory_is_shown_from_it():
+    assert listing.location("/srv/app", "/srv/app", "/", "/home/me") == "srv/app"
 
 
 def test_sessions_needing_you_come_first_then_working_then_the_most_recently_active():
@@ -296,6 +336,23 @@ def test_a_column_empty_on_every_line_is_left_out():
     bare = replace(SESSION, branch=None, model=None, context_tokens=None)
     assert listing.render([bare], NOW, PLAIN, None) == [
         "idle  5m  Fixing the login form  ~/projects/app/src"
+    ]
+
+
+def test_the_column_of_where_is_left_out_when_every_line_is_in_the_directory_listed():
+    here = replace(SESSION, location="")
+    assert listing.render([here, replace(HELPER, location="")], NOW, PLAIN, None) == [
+        "idle  5m  opus-5-5    52k  Fixing the login form  main",
+        "busy  1m  sonnet-5-5   9k  ↳ Find the callers     main",
+    ]
+
+
+def test_a_line_in_the_directory_listed_is_marked_here_beside_one_below_it():
+    here = replace(SESSION, location="")
+    below = replace(SESSION, location="src", title="Below")
+    assert listing.render([here, below], NOW, PLAIN, None) == [
+        "idle  5m  opus-5-5  52k  Fixing the login form  .    main",
+        "idle  5m  opus-5-5  52k  Below                  src  main",
     ]
 
 
@@ -431,7 +488,9 @@ def test_a_subagent_is_titled_by_what_it_was_asked_to_do_and_found_where_it_last
     assert listing.subagent_directory(found, "/home/me/projects/app") == (
         "/home/me/projects/app/.claude/worktrees/a1"
     )
-    assert listing.subagent(found, "/home/me/projects/app", "worktree-a1", "/home/me") == Subagent(
+    assert listing.subagent(
+        found, "~/projects/app/.claude/worktrees/a1", "worktree-a1"
+    ) == Subagent(
         location="~/projects/app/.claude/worktrees/a1",
         branch="worktree-a1",
         model="claude-sonnet-5-5",
@@ -444,12 +503,14 @@ def test_a_subagent_is_titled_by_what_it_was_asked_to_do_and_found_where_it_last
 def test_a_subagent_that_hasnt_said_where_it_is_works_where_its_session_does():
     found = subagents.Subagent("a1", Meta(None, background=True), UNKNOWN)
     assert listing.subagent_directory(found, "/home/me/projects/app") == "/home/me/projects/app"
-    assert listing.subagent(found, "/home/me/projects/app", None, "/home/me").title == "subagent"
+    assert listing.subagent(found, "~/projects/app", None).title == "subagent"
 
 
 def test_a_sessions_subagents_are_listed_the_most_recently_active_first():
     older = replace(HELPER, title="older", last_active=NOW - timedelta(minutes=9))
-    session = listing.session(ENTRY, TRANSCRIPT, "main", "/home/me", [older, HELPER], False, NOW)
+    session = listing.session(
+        ENTRY, TRANSCRIPT, "~/projects/app/src", "main", [older, HELPER], False, NOW
+    )
     assert session.subagents == (HELPER, older)
 
 

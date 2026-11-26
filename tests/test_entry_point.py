@@ -130,6 +130,24 @@ def test_a_relative_path_is_from_the_current_directory(tmp_path: Path):
     assert "In the app" in lines[0]
 
 
+def test_with_a_path_each_directory_is_shown_from_it(tmp_path: Path):
+    app = tmp_path / "projects" / "app"
+    (app / "src").mkdir(parents=True)
+    session_in(tmp_path, app / "src", os.getpid(), "s1", "idle", "In the source")
+    session_in(tmp_path, app, os.getppid(), "s2", "busy", "In the app")
+    lines = launch(tmp_path, str(app)).stdout.splitlines()
+    assert lines[0].endswith("  In the app     .")
+    assert lines[1].endswith("  In the source  src")
+
+
+def test_with_a_path_every_session_works_in_the_directory_column_is_left_out(tmp_path: Path):
+    app = tmp_path / "app"
+    app.mkdir()
+    session_in(tmp_path, app, os.getpid(), "s1", "idle", "In the app")
+    [line, _] = launch_in(tmp_path, app, ".").stdout.splitlines()
+    assert line.endswith("  In the app")
+
+
 def test_a_path_that_isnt_a_directory_says_so(tmp_path: Path):
     result = launch(tmp_path, str(tmp_path / "missing"))
     assert result.returncode != 0
