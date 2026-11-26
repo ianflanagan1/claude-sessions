@@ -9,9 +9,10 @@ marked ↳, but aren't counted as sessions.
 The title is the name you gave the session, in bold, or one Claude Code gave it; otherwise the
 title Claude gave the conversation, which it updates as the conversation moves on.
 
-On a terminal the list stays on screen, redrawn every 2 seconds, until you press Ctrl-C. Piped or
-captured, it's printed once. `claude-sessions <path>` lists only the sessions working in path or
-below it: `claude-sessions .` those working here.
+On a terminal the list stays on screen, redrawn every 2 seconds, until you press Ctrl-C, and the
+archived sessions --close-archived would close are closed before each redraw. Piped or captured,
+it's printed once, and closes nothing. `claude-sessions <path>` lists only the sessions working
+in path or below it: `claude-sessions .` those working here.
 
 `claude-sessions --close-archived` ends the sessions you've archived in VS Code or Cursor's Claude
 Code panel: archiving there hides a session but leaves it running. Only idle ones are closed,
@@ -127,25 +128,29 @@ def _root(path: str | None) -> str | None:
 
 def _close_archived() -> outcome.Done | outcome.NothingToDo:
     _check_platform()
-    home = Path.home()
+    closed = _close(Path.home())
+    if not closed:
+        return outcome.NothingToDo("No archived sessions to close.")
+    return outcome.Done(
+        closing.summary(len(closed)),
+        *(f"{entry.name or entry.session_id} (pid {entry.pid})" for entry in closed),
+    )
+
+
+def _close(home: Path) -> list[registry.Entry]:
+    """Ends the running sessions archived in an editor that closing.closable picks, and gives
+    those it ended."""
     entries = registry.running(home / ".claude" / "sessions")
     found = archive.archived(
         archive.databases(sys.platform, home, os.environ.get("XDG_CONFIG_HOME"))
     )
     archived = [entry for entry in entries if entry.session_id in found]
     described = {entry.pid: processes.describe(entry.pid) for entry in archived}
-    closed = [
+    return [
         entry
         for entry in closing.closable(archived, found, described)
         if processes.terminate(entry.pid)
     ]
-    if not closed:
-        return outcome.NothingToDo("No archived sessions to close.")
-    noun = "session" if len(closed) == 1 else "sessions"
-    return outcome.Done(
-        f"Closed {len(closed)} archived {noun}.",
-        *(f"{entry.name or entry.session_id} (pid {entry.pid})" for entry in closed),
-    )
 
 
 def _show_changes(path: str) -> outcome.NothingToDo:
@@ -231,15 +236,18 @@ def _print(only_active: bool, root: str | None) -> outcome.NothingToDo:
 
 
 def _watch(only_active: bool, root: str | None) -> outcome.NothingToDo:
-    """Redraws the list on the alternate screen until Ctrl-C or SIGTERM, then leaves the screen
-    as it was, for cli.finish to print the last count under."""
+    """Closes the archived sessions closing.closable picks and redraws the list on the alternate
+    screen, until Ctrl-C or SIGTERM, then leaves the screen as it was, for cli.finish to print
+    the last count under."""
     _check_platform()
     signal.signal(signal.SIGTERM, _interrupt)
     colour = Style.for_stream(sys.stdout)
+    home = Path.home()
     summary = "Stopped."
     sys.stdout.write(_ENTER)
     try:
         while True:
+            _close(home)
             shown, sessions = _gather(only_active, root)
             rows = listing.rows(shown)
             summary = listing.count(sessions)

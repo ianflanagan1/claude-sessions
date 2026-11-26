@@ -188,6 +188,30 @@ def test_on_a_terminal_it_redraws_the_list_as_sessions_change_until_interrupted(
         os.close(terminal)
 
 
+def test_on_a_terminal_it_keeps_an_archived_session_whose_process_has_just_started(
+    tmp_path: Path,
+):
+    process = sleeper()
+    editor_session(tmp_path, process.pid, "s1", "idle")
+    archive_in_editor(tmp_path, ["s1"])
+    terminal, its_end = os.openpty()
+    env = os.environ | {"HOME": str(tmp_path), "NO_COLOR": "1"}
+    env.pop("XDG_CONFIG_HOME", None)
+    watcher = subprocess.Popen([BIN], stdin=its_end, stdout=its_end, stderr=its_end, env=env)
+    os.close(its_end)
+    try:
+        read_until(terminal, "1 session: 1 idle.")
+        watcher.send_signal(signal.SIGINT)
+        last = read_until(terminal, "➖ 1 session: 1 idle.")
+        assert "Closed" not in last
+        assert watcher.wait(timeout=WAIT_SECONDS) == 0
+        assert process.poll() is None
+    finally:
+        watcher.kill()
+        process.kill()
+        os.close(terminal)
+
+
 def read_until(terminal: int, marker: str) -> str:
     seen = b""
     deadline = time.monotonic() + WAIT_SECONDS

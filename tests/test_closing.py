@@ -60,3 +60,11 @@ def test_a_process_that_started_after_the_record_was_written_is_kept():
 def test_a_session_whose_process_cant_be_told_is_kept():
     assert not close(ENTRY, None)
     assert not close(replace(ENTRY, process_started=None), SETTLED)
+
+
+def test_one_closed_session_is_counted_singly():
+    assert closing.summary(1) == "Closed 1 archived session."
+
+
+def test_several_closed_sessions_are_counted():
+    assert closing.summary(3) == "Closed 3 archived sessions."

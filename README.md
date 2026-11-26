@@ -29,7 +29,7 @@ They aren't counted as sessions. A subagent runs inside its session's process, w
 - A foreground subagent runs while its session is busy or waiting on it, until its reply ends its turn or the session moves on without it, as when you interrupt it.
 - Either ends with its session's process, so one last active before that process started isn't running.
 
-On a terminal the list stays on screen and is redrawn every 2 seconds, cut to fit the window (only the sessions on screen set the columns' widths), until you press Ctrl-C; it then prints the last count. Piped or captured, it's printed once, as above.
+On a terminal the list stays on screen and is redrawn every 2 seconds, cut to fit the window (only the sessions on screen set the columns' widths), until you press Ctrl-C; it then prints the last count. Before each redraw it closes the archived sessions `--close-archived` would, whatever path or `--active` limits the list to, without reporting them. Piped or captured, it's printed once, as above, and closes nothing.
 
 The title is the name you gave the session, in bold, or one Claude Code gave it; otherwise the title Claude gave the conversation, which it updates as the conversation moves on.
 
@@ -37,7 +37,7 @@ Built on [cli-kit](../cli-kit).
 
 ## Closing archived sessions
 
-Archiving a session in VS Code or Cursor's Claude Code panel hides it from the list but leaves its process running, holding a couple of hundred MB. `claude-sessions --close-archived` ends them, with SIGTERM, and lists each one it closed. Each session's history stays in its transcript, to open again from the editor's past sessions.
+Archiving a session in VS Code or Cursor's Claude Code panel hides it from the list but leaves its process running, holding a couple of hundred MB. `claude-sessions --close-archived` ends them, with SIGTERM, and lists each one it closed. Watching the list on a terminal does the same every 2 seconds. Each session's history stays in its transcript, to open again from the editor's past sessions.
 
 It closes a session only when all of these hold, and keeps it otherwise:
 

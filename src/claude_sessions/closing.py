@@ -36,3 +36,9 @@ def _settled(entry: Entry, process: Process | None) -> bool:
         and entry.process_started.split() == process.started.split()
         and process.age >= MINIMUM_AGE
     )
+
+
+def summary(closed: int) -> str:
+    """How many archived sessions were closed."""
+    noun = "session" if closed == 1 else "sessions"
+    return f"Closed {closed} archived {noun}."
