@@ -16,9 +16,9 @@ in path or below it: `claude-sessions .` those working here.
 
 `claude-sessions --close-archived` ends the sessions you've archived in VS Code or Cursor's Claude
 Code panel: archiving there hides a session but leaves it running. Only idle ones are closed,
-never one busy or waiting for you, nor one you've since resumed in a terminal, nor one whose
-process has run for under a minute. Each closed
-session's history stays on disk, to open again from the editor's list of past sessions.
+never one busy or waiting for you, nor one with a subagent still running, nor one you've since
+resumed in a terminal, nor one whose process has run for under a minute. Each closed session's
+history stays on disk, to open again from the editor's list of past sessions.
 
 `claude-sessions --changes [<path>]` lists what's uncommitted in the git repository at path, here by
 default, and which running sessions edited each file since it was last committed, so you, or a
@@ -145,12 +145,22 @@ def _close(home: Path) -> list[registry.Entry]:
         archive.databases(sys.platform, home, os.environ.get("XDG_CONFIG_HOME"))
     )
     archived = [entry for entry in entries if entry.session_id in found]
+    working = frozenset(entry.session_id for entry in archived if _subagents_running(home, entry))
     described = {entry.pid: processes.describe(entry.pid) for entry in archived}
     return [
         entry
-        for entry in closing.closable(archived, found, described)
+        for entry in closing.closable(archived, found, working, described)
         if processes.terminate(entry.pid)
     ]
+
+
+def _subagents_running(home: Path, entry: registry.Entry) -> bool:
+    """Whether any of entry's session's subagents is still running in its process."""
+    projects = home / ".claude" / "projects"
+    told = transcript.read(projects, entry.session_id)
+    since = processes.started_at(entry.process_started)
+    found = subagents.read(projects, entry.session_id, since)
+    return bool(subagents.running(found, entry.status, told, since))
 
 
 def _show_changes(path: str) -> outcome.NothingToDo:

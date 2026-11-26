@@ -12,18 +12,23 @@ was archived, so one just opened, even from the archived list, is left to settle
 
 
 def closable(
-    entries: list[Entry], archived: frozenset[str], processes: Mapping[int, Process | None]
+    entries: list[Entry],
+    archived: frozenset[str],
+    working: frozenset[str],
+    processes: Mapping[int, Process | None],
 ) -> list[Entry]:
-    """The sessions safe to close: archived, idle, started by an editor's Claude Code panel, and
-    still the process their record names, which started when the record says and has run for
-    MINIMUM_AGE (processes gives each pid's process). A session resumed in a terminal keeps its
-    archived id, so isn't one of them; nor is one busy or waiting for you, or whose process
-    can't be told."""
+    """The sessions safe to close: archived, idle with no subagent running (working holds the
+    ids of those with one), started by an editor's Claude Code panel, and still the process their
+    record names, which started when the record says and has run for MINIMUM_AGE (processes
+    gives each pid's process). A session resumed in a terminal keeps its archived id, so isn't
+    one of them; nor is one busy or waiting for you, one whose background subagent is still at
+    work, since it runs in the session's process, or one whose process can't be told."""
     return [
         entry
         for entry in entries
         if entry.session_id in archived
         and entry.status == "idle"
+        and entry.session_id not in working
         and entry.entrypoint == "claude-vscode"
         and _settled(entry, processes.get(entry.pid))
     ]

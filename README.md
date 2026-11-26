@@ -43,6 +43,7 @@ It closes a session only when all of these hold, and keeps it otherwise:
 
 - it's archived in VS Code, VS Code Insiders, Cursor or VSCodium
 - it's idle, not busy or waiting for you
+- none of its subagents is still running, as one in the background can be while it's idle: a subagent runs in its session's process, so would end with it
 - an editor's panel started it: a session you've resumed in a terminal keeps its archived id, but isn't closed
 - its process has run for at least a minute, so one you've just opened, even from the archived list, is left alone; how long ago it was archived doesn't matter
 - its process is still the one its record names, started when the record says, not a later process given the same pid

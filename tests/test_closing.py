@@ -23,7 +23,15 @@ SETTLED = Process(age=timedelta(minutes=1), started=STARTED)
 
 
 def close(entry: Entry, process: Process | None) -> bool:
-    return closing.closable([entry], frozenset({"s1"}), {entry.pid: process}) == [entry]
+    return closing.closable([entry], frozenset({"s1"}), frozenset(), {entry.pid: process}) == [
+        entry
+    ]
+
+
+def test_an_idle_session_with_a_subagent_still_running_is_kept():
+    assert (
+        closing.closable([ENTRY], frozenset({"s1"}), frozenset({"s1"}), {ENTRY.pid: SETTLED}) == []
+    )
 
 
 def test_an_idle_archived_editor_session_whose_process_has_run_a_minute_is_closed():
