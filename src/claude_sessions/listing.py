@@ -51,6 +51,8 @@ class Subagent:
     model: str | None
     context_tokens: int | None
     title: str
+    first_active: datetime | None
+    """When it started: its first prompt or reply."""
     last_active: datetime | None
 
 
@@ -68,7 +70,7 @@ class Session:
     user_named: bool
     last_active: datetime | None
     subagents: tuple[Subagent, ...]
-    """Its subagents still running, the most recently active first."""
+    """Its subagents still running, in the order they started."""
     blank: bool
     """Whether it's idle with nothing said in it yet, as when just opened: counted, not listed."""
     archived: bool
@@ -125,7 +127,7 @@ def session(
         title=title(entry, transcript),
         user_named=entry.named_by == "user",
         last_active=max(times, default=None),
-        subagents=tuple(_by_recency(running)),
+        subagents=tuple(_by_start(running)),
         blank=entry.status == _IDLE and not transcript.started and not running,
         archived=archived,
     )
@@ -155,6 +157,7 @@ def subagent(found: subagents.Subagent, location: str, branch: str | None) -> Su
         model=found.transcript.model,
         context_tokens=found.transcript.context_tokens,
         title=found.meta.title or _SUBAGENT_TITLE,
+        first_active=found.transcript.first_activity,
         last_active=found.transcript.last_activity,
     )
 
@@ -330,10 +333,19 @@ def _title(row: Row) -> str:
             assert_never(row)
 
 
-def _by_recency[T: (Session, Subagent)](rows: Sequence[T]) -> list[T]:
+def _by_recency(rows: Sequence[Session]) -> list[Session]:
     """rows, the most recently active first."""
     return sorted(
         rows, key=lambda r: r.last_active.timestamp() if r.last_active else 0, reverse=True
+    )
+
+
+def _by_start(rows: Sequence[Subagent]) -> list[Subagent]:
+    """rows in the order they started, so that their order holds as they take turns being the
+    latest active. One whose start isn't known comes last."""
+    return sorted(
+        rows,
+        key=lambda r: (r.first_active is None, r.first_active.timestamp() if r.first_active else 0),
     )
 
 

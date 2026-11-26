@@ -17,7 +17,7 @@ Each line is a session's status, how long since it was last active, its model, h
 
 `claude-sessions <path>` lists only the sessions working in that directory or below it, so `claude-sessions .` lists those working here. The path can be relative or absolute. A session's directory is the one shown, where it last worked, and both are compared with symbolic links resolved. Each directory is then shown from that path, as in `src` or `.claude/worktrees/a1`, and as `.` for the path itself, while a subagent working outside it keeps its full directory. When every line is in the path itself, the directory column is left out, since the count already names it. It combines with `--active`. Everything is then of the sessions working there: the count, blank ones among them, as in `~/projects/cli/claude-sessions: 2 sessions (1 busy, 1 idle).`, and the archived sessions closed.
 
-A session's subagents that are still running are listed under it, most recently active first, as `busy`, titled `↳` and what they were asked to do, in the directory each last worked in, such as a worktree of its own:
+A session's subagents that are still running are listed under it, in the order they started, as `busy`, titled `↳` and what they were asked to do, in the directory each last worked in, such as a worktree of its own:
 
 ```
 idle     now  opus-5-5    66k  Repo-fix integration setting failure  ~/projects/cli/repo-tools  main

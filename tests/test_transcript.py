@@ -53,6 +53,7 @@ def test_where_it_is_and_what_runs_it_come_from_its_latest_reply():
         cwd="/home/me/projects/app",
         model="claude-opus-5-5",
         context_tokens=52_003,
+        first_activity=datetime(2026, 10, 31, 13, 31, tzinfo=UTC),
         last_activity=datetime(2026, 10, 31, 14, 0, tzinfo=UTC),
         started=True,
         ended=False,
@@ -69,6 +70,18 @@ def test_a_prompt_after_the_latest_reply_is_its_latest_activity():
     )
     assert summary.last_activity == datetime(2026, 10, 31, 15, 0, tzinfo=UTC)
     assert summary.cwd == "/home/me/x"
+
+
+def test_its_first_prompt_or_reply_is_its_first_activity():
+    summary = transcript.summarise(
+        lines(
+            {"type": "queue-operation", "timestamp": "2026-10-31T13:00:00.000Z"},
+            assistant(isSidechain=True, timestamp="2026-10-31T13:10:00.000Z"),
+            {"type": "user", "timestamp": "2026-10-31T13:20:00.000Z"},
+            assistant(),
+        )
+    )
+    assert summary.first_activity == datetime(2026, 10, 31, 13, 20, tzinfo=UTC)
 
 
 def test_a_subagents_replies_say_nothing_about_the_sessions_context():
@@ -119,6 +132,7 @@ def test_a_subagents_own_transcript_tells_what_runs_it_and_how_far_it_has_got():
         cwd="/home/me/projects/app/.claude/worktrees/a1",
         model="claude-opus-5-5",
         context_tokens=52_003,
+        first_activity=datetime(2026, 10, 31, 13, 31, tzinfo=UTC),
         last_activity=datetime(2026, 10, 31, 13, 32, tzinfo=UTC),
         started=True,
         ended=False,

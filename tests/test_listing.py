@@ -32,6 +32,7 @@ TRANSCRIPT = Transcript(
     cwd="/home/me/projects/app/src",
     model="claude-opus-5-5",
     context_tokens=52_003,
+    first_activity=NOW - timedelta(minutes=20),
     last_activity=NOW - timedelta(minutes=5),
     started=True,
     ended=False,
@@ -64,6 +65,7 @@ HELPER = Subagent(
     model="claude-sonnet-5-5",
     context_tokens=9_000,
     title="Find the callers",
+    first_active=NOW - timedelta(minutes=4),
     last_active=NOW - timedelta(minutes=1),
 )
 
@@ -497,6 +499,7 @@ def test_a_subagent_is_titled_by_what_it_was_asked_to_do_and_found_where_it_last
         model="claude-sonnet-5-5",
         context_tokens=9_000,
         title="Find the callers",
+        first_active=NOW - timedelta(minutes=20),
         last_active=NOW - timedelta(minutes=5),
     )
 
@@ -507,12 +510,13 @@ def test_a_subagent_that_hasnt_said_where_it_is_works_where_its_session_does():
     assert listing.subagent(found, "~/projects/app", None).title == "subagent"
 
 
-def test_a_sessions_subagents_are_listed_the_most_recently_active_first():
-    older = replace(HELPER, title="older", last_active=NOW - timedelta(minutes=9))
+def test_a_sessions_subagents_are_listed_in_the_order_they_started_however_recently_active():
+    first = replace(HELPER, title="first", first_active=NOW - timedelta(minutes=9))
+    unknown = replace(HELPER, title="unknown", first_active=None)
     session = listing.session(
-        ENTRY, TRANSCRIPT, "~/projects/app/src", "main", [older, HELPER], False, NOW
+        ENTRY, TRANSCRIPT, "~/projects/app/src", "main", [unknown, HELPER, first], False, NOW
     )
-    assert session.subagents == (HELPER, older)
+    assert session.subagents == (first, HELPER, unknown)
 
 
 def test_each_session_is_followed_by_its_subagents():
