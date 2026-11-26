@@ -48,10 +48,16 @@ def session_in(home: Path, cwd: Path, pid: int, session_id: str, status: str, ti
     sessions.mkdir(parents=True, exist_ok=True)
     record = {"pid": pid, "sessionId": session_id, "cwd": str(cwd), "status": status}
     (sessions / f"{pid}.json").write_text(json.dumps(record))
+    prompted(home, session_id, {"type": "ai-title", "aiTitle": title})
+
+
+def prompted(home: Path, session_id: str, *records: dict[str, object]) -> None:
+    """Writes session_id's transcript: the prompt it was given, then records."""
     transcripts = home / ".claude" / "projects" / "-home"
     transcripts.mkdir(parents=True, exist_ok=True)
+    prompt = {"type": "user", "timestamp": datetime.now(UTC).isoformat()}
     (transcripts / f"{session_id}.jsonl").write_text(
-        json.dumps({"type": "ai-title", "aiTitle": title}) + "\n"
+        "".join(json.dumps(record) + "\n" for record in (prompt, *records))
     )
 
 
@@ -84,6 +90,20 @@ def test_active_lists_only_the_sessions_waiting_or_busy_but_counts_them_all(tmp_
     assert len(lines) == 2
     assert "Asking" in lines[0]
     assert lines[1] == "➖ 2 sessions: 1 waiting, 1 idle."
+
+
+def test_a_session_with_nothing_said_in_it_yet_is_counted_as_blank_but_not_listed(
+    tmp_path: Path,
+):
+    session(tmp_path, os.getpid(), "s1", "idle", "Fixing the login form")
+    sessions = tmp_path / ".claude" / "sessions"
+    record = {"pid": os.getppid(), "sessionId": "s2", "status": "idle", "name": "app-86"}
+    (sessions / f"{os.getppid()}.json").write_text(json.dumps(record))
+    result = launch(tmp_path)
+    assert result.returncode == 0, result.stderr
+    [line, count] = result.stdout.splitlines()
+    assert "Fixing the login form" in line
+    assert count == "➖ 2 sessions: 1 idle, 1 blank."
 
 
 def test_a_path_lists_only_the_sessions_working_in_that_directory_or_below_it(tmp_path: Path):
@@ -267,6 +287,7 @@ def editor_session(home: Path, pid: int, session_id: str, status: str) -> None:
         "procStart": started,
     }
     (sessions / f"{pid}.json").write_text(json.dumps(record))
+    prompted(home, session_id)
 
 
 def archive_in_editor(home: Path, session_ids: list[str]) -> None:

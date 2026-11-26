@@ -4,7 +4,8 @@ Lists each session on its own line: its status, how long since it was last activ
 how much of its context it has used, its title, the directory it last worked in, cut from the left
 when long, and its git branch. Sessions waiting for you come first, then busy ones, then idle
 ones, each most recently active first. A session's subagents still running are listed under it,
-marked ↳, but aren't counted as sessions.
+marked ↳, but aren't counted as sessions. A session that's idle with nothing said in it yet, as
+when just opened, isn't listed, but is counted as blank.
 
 The title is the name you gave the session, in bold, or one Claude Code gave it; otherwise the
 title Claude gave the conversation, which it updates as the conversation moves on.
@@ -287,8 +288,8 @@ def _interrupt(signum: int, frame: object) -> None:
 def _gather(
     only_active: bool, root: str | None
 ) -> tuple[list[listing.Session], list[listing.Session]]:
-    """The sessions to show, in order, and every session running, to count. With a root, only
-    those working in it or below it are shown."""
+    """The sessions to show, in order, and every session running, to count. Blank ones aren't
+    shown. With a root, only those working in it or below it are shown."""
     home = Path.home()
     claude = home / ".claude"
     sessions = []
@@ -319,7 +320,8 @@ def _gather(
             directory is not None and listing.within(os.path.realpath(directory), root)
         ):
             placed.append(listed)
-    shown = listing.ordered(listing.active(placed) if only_active else placed)
+    listed = listing.started(placed)
+    shown = listing.ordered(listing.active(listed) if only_active else listed)
     return shown, sessions
 
 

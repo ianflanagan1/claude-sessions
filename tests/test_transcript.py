@@ -54,6 +54,7 @@ def test_where_it_is_and_what_runs_it_come_from_its_latest_reply():
         model="claude-opus-5-5",
         context_tokens=52_003,
         last_activity=datetime(2026, 10, 31, 14, 0, tzinfo=UTC),
+        started=True,
         ended=False,
         subagents_stopped={},
     )
@@ -119,9 +120,27 @@ def test_a_subagents_own_transcript_tells_what_runs_it_and_how_far_it_has_got():
         model="claude-opus-5-5",
         context_tokens=52_003,
         last_activity=datetime(2026, 10, 31, 13, 32, tzinfo=UTC),
+        started=True,
         ended=False,
         subagents_stopped={},
     )
+
+
+def test_a_transcript_with_a_prompt_or_a_reply_has_started():
+    prompt = {"type": "user", "timestamp": "2026-10-31T13:30:00.000Z"}
+    assert transcript.summarise(lines(prompt)).started
+    assert transcript.summarise(lines(assistant())).started
+
+
+def test_a_transcript_with_only_records_about_it_has_not_started():
+    summary = transcript.summarise(
+        lines({"type": "session-owner"}, {"type": "ai-title", "aiTitle": "Kept"})
+    )
+    assert not summary.started
+
+
+def test_a_subagents_message_in_a_sessions_transcript_does_not_start_it():
+    assert not transcript.summarise(lines(assistant(isSidechain=True))).started
 
 
 def test_a_transcript_whose_latest_reply_ended_its_turn_has_ended():

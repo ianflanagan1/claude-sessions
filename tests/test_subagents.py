@@ -117,6 +117,7 @@ def test_a_sessions_subagents_are_read_from_their_transcripts_and_metadata(tmp_p
                 model=None,
                 context_tokens=None,
                 last_activity=datetime(2026, 11, 8, 9, 59, tzinfo=UTC),
+                started=True,
                 ended=False,
                 subagents_stopped={},
             ),

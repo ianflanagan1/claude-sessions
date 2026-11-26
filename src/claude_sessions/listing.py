@@ -16,6 +16,8 @@ from claude_sessions.transcript import Transcript
 _ORDER = ("waiting", "busy", "idle")
 _ACTIVE = ("waiting", "busy")
 _UNKNOWN = "unknown"
+_IDLE = "idle"
+_BLANK = "blank"
 # A subagent listed is running; only its session can be waiting for you.
 _SUBAGENT_STATUS = "busy"
 _SUBAGENT_MARK = "↳ "
@@ -57,6 +59,8 @@ class Session:
     last_active: datetime | None
     subagents: tuple[Subagent, ...]
     """Its subagents still running, the most recently active first."""
+    blank: bool
+    """Whether it's idle with nothing said in it yet, as when just opened: counted, not listed."""
 
 
 type Row = Session | Subagent
@@ -83,7 +87,8 @@ def session(
     running: Sequence[Subagent],
 ) -> Session:
     """A session as listed: in its directory, on branch, under its title, with the subagents it
-    has running."""
+    has running. It's blank when idle with no prompt or reply in its transcript and no subagent
+    running; one busy or waiting has been given its first prompt."""
     times = [t for t in (transcript.last_activity, entry.updated) if t is not None]
     return Session(
         status=entry.status,
@@ -95,6 +100,7 @@ def session(
         user_named=entry.named_by == "user",
         last_active=max(times, default=None),
         subagents=tuple(_by_recency(running)),
+        blank=entry.status == _IDLE and not transcript.started and not running,
     )
 
 
@@ -122,6 +128,11 @@ def ordered(sessions: Sequence[Session]) -> list[Session]:
     """Waiting for you, then busy, then idle, then any other status; within each, the most
     recently active first."""
     return sorted(_by_recency(sessions), key=lambda s: _rank(s.status))
+
+
+def started(sessions: Sequence[Session]) -> list[Session]:
+    """The sessions to list: all but the blank ones."""
+    return [s for s in sessions if not s.blank]
 
 
 def active(sessions: Sequence[Session]) -> list[Session]:
@@ -212,11 +223,16 @@ def age(when: datetime | None, now: datetime) -> str:
 
 
 def count(sessions: Sequence[Session]) -> str:
-    """How many sessions there are, and how many in each status."""
+    """How many sessions there are, and how many in each status, then how many are blank, apart
+    from their status."""
     if not sessions:
         return "No sessions running."
-    statuses = Counter(s.status or _UNKNOWN for s in sessions)
+    listed = started(sessions)
+    statuses = Counter(s.status or _UNKNOWN for s in listed)
     parts = [f"{statuses[s]} {s}" for s in sorted(statuses, key=_rank)]
+    blank = len(sessions) - len(listed)
+    if blank:
+        parts.append(f"{blank} {_BLANK}")
     noun = "session" if len(sessions) == 1 else "sessions"
     return f"{len(sessions)} {noun}: {', '.join(parts)}."
 

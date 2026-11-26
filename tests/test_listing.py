@@ -32,6 +32,7 @@ TRANSCRIPT = Transcript(
     model="claude-opus-5-5",
     context_tokens=52_003,
     last_activity=NOW - timedelta(minutes=5),
+    started=True,
     ended=False,
     subagents_stopped={},
 )
@@ -45,6 +46,7 @@ SESSION = Session(
     user_named=False,
     last_active=NOW - timedelta(minutes=5),
     subagents=(),
+    blank=False,
 )
 
 
@@ -91,7 +93,32 @@ def test_without_a_transcript_it_is_where_it_started_and_named_after_its_directo
         user_named=False,
         last_active=NOW - timedelta(hours=3),
         subagents=(),
+        blank=True,
     )
+
+
+def test_an_idle_session_with_nothing_said_in_it_is_blank():
+    unsaid = replace(TRANSCRIPT, started=False)
+    assert listing.session(ENTRY, unsaid, None, "/home/me", []).blank
+
+
+def test_a_session_with_a_prompt_or_reply_in_it_is_not_blank():
+    assert not listing.session(ENTRY, TRANSCRIPT, None, "/home/me", []).blank
+
+
+def test_a_session_busy_or_waiting_on_its_first_prompt_is_not_blank():
+    for status in ("busy", "waiting", None):
+        entry = replace(ENTRY, status=status)
+        assert not listing.session(entry, UNKNOWN, None, "/home/me", []).blank
+
+
+def test_a_session_with_subagents_running_is_not_blank():
+    assert not listing.session(ENTRY, UNKNOWN, None, "/home/me", [HELPER]).blank
+
+
+def test_blank_sessions_are_not_listed():
+    blank = replace(SESSION, title="blank", blank=True)
+    assert listing.started([SESSION, blank]) == [SESSION]
 
 
 def test_a_status_change_after_its_latest_message_is_its_latest_activity():
@@ -229,6 +256,15 @@ def test_how_long_ago_reads_in_the_largest_whole_unit():
 def test_the_count_says_how_many_are_in_each_status():
     sessions = [SESSION, SESSION, replace(SESSION, status="busy"), replace(SESSION, status=None)]
     assert listing.count(sessions) == "4 sessions: 1 busy, 2 idle, 1 unknown."
+
+
+def test_the_count_says_how_many_are_blank_apart_from_their_status():
+    sessions = [SESSION, replace(SESSION, blank=True), replace(SESSION, status="busy")]
+    assert listing.count(sessions) == "3 sessions: 1 busy, 1 idle, 1 blank."
+
+
+def test_the_count_of_only_blank_sessions_says_so():
+    assert listing.count([replace(SESSION, blank=True)]) == "1 session: 1 blank."
 
 
 def test_the_count_of_one_session_is_singular():

@@ -35,13 +35,15 @@ class Transcript:
     context_tokens: int | None
     """How much of the context window the latest reply used."""
     last_activity: datetime | None
+    started: bool
+    """Whether it holds a message of its own, a prompt or a reply. One just opened holds none."""
     ended: bool
     """Whether its latest message is a reply that ended its turn."""
     subagents_stopped: Mapping[str, datetime]
     """When it was last told each of its background subagents had stopped, by agent id."""
 
 
-UNKNOWN = Transcript(None, None, None, None, None, False, {})
+UNKNOWN = Transcript(None, None, None, None, None, False, False, {})
 
 
 def summarise(lines: Iterable[str]) -> Transcript:
@@ -59,7 +61,7 @@ def summarise_subagent(lines: Iterable[str]) -> Transcript:
 def _summarise(lines: Iterable[str], sidechain: bool) -> Transcript:
     ai_title = cwd = model = None
     context_tokens = last_activity = None
-    ended = False
+    started = ended = False
     stopped: dict[str, datetime] = {}
     for line in lines:
         record = _record(line)
@@ -76,6 +78,7 @@ def _summarise(lines: Iterable[str], sidechain: bool) -> Transcript:
             case "user" | "assistant" if bool(record.get("isSidechain")) == sidechain:
                 cwd = _text(record, "cwd") or cwd
                 last_activity = at or last_activity
+                started = True
                 ended = False
                 if kind == "assistant":
                     ended = _stop_reason(record) == _END_TURN
@@ -84,7 +87,7 @@ def _summarise(lines: Iterable[str], sidechain: bool) -> Transcript:
                         model, context_tokens = reply
             case _:  # Other kinds of record, an open set Claude Code adds to.
                 pass
-    return Transcript(ai_title, cwd, model, context_tokens, last_activity, ended, stopped)
+    return Transcript(ai_title, cwd, model, context_tokens, last_activity, started, ended, stopped)
 
 
 def read(projects_dir: Path, session_id: str) -> Transcript:
