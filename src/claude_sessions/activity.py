@@ -2,7 +2,8 @@
 own tools, and the directories it ran shell commands in, whose changes the transcript can't name.
 
 A session's subagents keep their own transcripts, in ~/.claude/projects/<dir>/<session id>/
-subagents/, and what they did counts as the session's. The format is Claude Code's own and may
+subagents/, and its workflows' in subagents/workflows/<run id>/, and what they did counts as the
+session's. The format is Claude Code's own and may
 change, so a record or field that isn't as expected is skipped, not an error.
 """
 
@@ -77,6 +78,7 @@ def read(projects_dir: Path, session_id: str) -> list[Touch]:
     paths = [
         *projects_dir.glob(f"*/{session_id}.jsonl"),
         *projects_dir.glob(f"*/{session_id}/subagents/*.jsonl"),
+        *projects_dir.glob(f"*/{session_id}/subagents/workflows/*/agent-*.jsonl"),
     ]
     for path in paths:
         try:

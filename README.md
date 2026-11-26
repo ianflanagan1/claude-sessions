@@ -28,7 +28,8 @@ They aren't counted as sessions. A subagent runs inside its session's process, w
 
 - A background subagent runs until its session is told it stopped, and again once it's active after that, as when sent a message. Its session can be idle meanwhile.
 - A foreground subagent runs while its session is busy or waiting on it, until its reply ends its turn or the session moves on without it, as when you interrupt it.
-- Either ends with its session's process, so one last active before that process started isn't running.
+- A subagent a workflow started, titled by its label such as `review:java`, runs until the run's journal records what it returned, or the run ends. Its session can be idle meanwhile.
+- Any of them ends with its session's process, so one last active before that process started isn't running.
 
 On a terminal the list stays on screen and is redrawn every 2 seconds, cut to fit the window (only the sessions on screen set the columns' widths), until you press Ctrl-C; it then prints the last count. Before each redraw it closes the archived sessions `--close-archived` would, working in the path given, if any, whatever `--active` limits the list to, without reporting them. Piped or captured, it's printed once, as above, and closes nothing.
 
@@ -87,9 +88,11 @@ Claude Code's own files, read directly:
 | Sessions running, their status, name and who named them | `~/.claude/sessions/<pid>.json`, one per session; a file whose process has gone is skipped |
 | Title, directory, model, context used, last activity | The session's transcript, `~/.claude/projects/<dir>/<session id>.jsonl` |
 | Its subagents, what each was asked to do, and whether in the background | `~/.claude/projects/<dir>/<session id>/subagents/agent-<id>.jsonl` and `agent-<id>.meta.json` |
+| Its workflows' subagents, and which have returned | The same files in `subagents/workflows/<run id>/`, beside the run's `journal.jsonl` |
+| When a workflow run ended | Its record, `~/.claude/projects/<dir>/<session id>/workflows/<run id>.json`, written as it ends |
 | When a background subagent stopped | The task notification it sends its session, in the session's transcript |
 | When a session's process started, to leave out subagents of an earlier one | `procStart` in `~/.claude/sessions/<pid>.json` |
-| What each session edited, and where it ran commands | The tool calls in its transcript, and its subagents' in `~/.claude/projects/<dir>/<session id>/subagents/` |
+| What each session edited, and where it ran commands | The tool calls in its transcript, and its subagents' in `~/.claude/projects/<dir>/<session id>/subagents/` and its workflows' in `subagents/workflows/<run id>/` |
 | When each session's status last changed | `statusUpdatedAt` in `~/.claude/sessions/<pid>.json` |
 | Which sessions are archived | Each editor's `state.vscdb`; see [Closing archived sessions](#closing-archived-sessions) |
 | Branch, uncommitted files, when each was last committed | `git` in the session's directory, or the repository given to `--changes`. The transcript's own `gitBranch` is the branch it started on, so isn't used |

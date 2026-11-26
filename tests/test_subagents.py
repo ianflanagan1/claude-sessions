@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from claude_sessions import subagents
-from claude_sessions.subagents import Meta, Subagent
+from claude_sessions.subagents import Meta, Shape, Subagent
 from claude_sessions.transcript import UNKNOWN, Transcript
 
 STARTED = datetime(2026, 11, 8, 9, 0, tzinfo=UTC)
@@ -16,22 +16,30 @@ NOW = STARTED + timedelta(hours=1)
 
 SESSION = replace(UNKNOWN, last_activity=NOW - timedelta(minutes=5))
 WORKING = replace(UNKNOWN, model="claude-sonnet-5-5", last_activity=NOW - timedelta(minutes=1))
-FOREGROUND = Subagent("a1", Meta("Find the callers", background=False), WORKING)
-BACKGROUND = Subagent("a2", Meta("Transition fields on move", background=True), WORKING)
+FOREGROUND = Subagent("a1", Meta("Find the callers", Shape.FOREGROUND), WORKING, finished=False)
+BACKGROUND = Subagent(
+    "a2", Meta("Transition fields on move", Shape.BACKGROUND), WORKING, finished=False
+)
+IN_WORKFLOW = Subagent("a3", Meta("write:csharp", Shape.WORKFLOW), WORKING, finished=False)
 
 
 def test_a_subagent_is_titled_by_what_it_was_asked_to_do_else_its_kind_of_agent():
     assert subagents.meta(
         {"agentType": "general-purpose", "description": "Find the callers"}
-    ) == Meta("Find the callers", background=False)
+    ) == Meta("Find the callers", Shape.FOREGROUND)
     assert subagents.meta({"agentType": "ianf-commit-worker"}) == Meta(
-        "ianf-commit-worker", background=False
+        "ianf-commit-worker", Shape.FOREGROUND
     )
-    assert subagents.meta({}) == Meta(None, background=False)
+    assert subagents.meta({}) == Meta(None, Shape.FOREGROUND)
 
 
 def test_a_subagent_asked_to_run_in_the_background_is_one():
-    assert subagents.meta({"requestShape": "background"}) == Meta(None, background=True)
+    assert subagents.meta({"requestShape": "background"}) == Meta(None, Shape.BACKGROUND)
+
+
+def test_a_subagent_a_workflow_started_is_one_whatever_shape_it_was_asked_for():
+    record = {"description": "write:csharp", "requestShape": "foreground", "inWorkflowRun": True}
+    assert subagents.meta(record) == Meta("write:csharp", Shape.WORKFLOW)
 
 
 def test_metadata_that_isnt_a_record_is_none():
@@ -71,9 +79,31 @@ def test_a_background_subagent_sent_a_message_after_it_stopped_runs_again():
     assert subagents.running([BACKGROUND], "idle", session, STARTED) == [BACKGROUND]
 
 
+def test_a_workflows_subagent_runs_whatever_its_session_is_doing():
+    assert subagents.running([IN_WORKFLOW], "idle", SESSION, STARTED) == [IN_WORKFLOW]
+
+
+def test_a_workflows_subagent_has_stopped_once_it_has_finished():
+    finished = replace(IN_WORKFLOW, finished=True)
+    assert subagents.running([finished], "idle", SESSION, STARTED) == []
+
+
+def test_a_workflows_journal_tells_which_of_its_subagents_have_returned():
+    journal = [
+        json.dumps({"type": "launched"}),
+        json.dumps({"type": "started", "agentId": "a3", "label": "write:csharp"}),
+        json.dumps({"type": "started", "agentId": "a4", "label": "write:java"}),
+        json.dumps({"type": "result", "agentId": "a3", "result": {}}),
+        json.dumps({"type": "result"}),
+        json.dumps(["result"]),
+        "{not json",
+    ]
+    assert subagents.returned(journal) == frozenset({"a3"})
+
+
 def test_a_subagent_last_active_before_its_sessions_process_started_ended_with_an_earlier_one():
     earlier = replace(WORKING, last_activity=STARTED - timedelta(seconds=1))
-    stale = [replace(FOREGROUND, transcript=earlier), replace(BACKGROUND, transcript=earlier)]
+    stale = [replace(s, transcript=earlier) for s in (FOREGROUND, BACKGROUND, IN_WORKFLOW)]
     assert subagents.running(stale, "busy", SESSION, STARTED) == []
 
 
@@ -110,7 +140,7 @@ def test_a_sessions_subagents_are_read_from_their_transcripts_and_metadata(tmp_p
     assert subagents.read(tmp_path, "s1", STARTED) == [
         Subagent(
             "a2",
-            Meta("Transition fields on move", background=True),
+            Meta("Transition fields on move", Shape.BACKGROUND),
             Transcript(
                 ai_title=None,
                 cwd="/home/me/app",
@@ -121,6 +151,7 @@ def test_a_sessions_subagents_are_read_from_their_transcripts_and_metadata(tmp_p
                 ended=False,
                 subagents_stopped={},
             ),
+            finished=False,
         )
     ]
 
@@ -136,6 +167,39 @@ def test_a_subagent_whose_transcript_was_last_written_before_its_session_started
     before = (STARTED - timedelta(minutes=1)).timestamp()
     os.utime(written, (before, before))
     assert subagents.read(tmp_path, "s1", STARTED) == []
+
+
+def _write_agent(folder: Path, agent_id: str, meta: dict[str, object]) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"agent-{agent_id}.meta.json").write_text(json.dumps(meta))
+    log = folder / f"agent-{agent_id}.jsonl"
+    log.write_text("")
+    written = (NOW - timedelta(minutes=1)).timestamp()
+    os.utime(log, (written, written))
+
+
+IN_RUN = {"description": "write:csharp", "requestShape": "foreground", "inWorkflowRun": True}
+
+
+def test_a_workflows_subagents_are_read_with_whether_its_journal_says_each_returned(
+    tmp_path: Path,
+):
+    run = tmp_path / "-home-me-app" / "s1" / "subagents" / "workflows" / "wf_1"
+    _write_agent(run, "a3", IN_RUN)
+    _write_agent(run, "a4", IN_RUN | {"description": "write:java"})
+    (run / "journal.jsonl").write_text(json.dumps({"type": "result", "agentId": "a3"}) + "\n")
+    assert [(s.agent_id, s.meta, s.finished) for s in subagents.read(tmp_path, "s1", STARTED)] == [
+        ("a3", Meta("write:csharp", Shape.WORKFLOW), True),
+        ("a4", Meta("write:java", Shape.WORKFLOW), False),
+    ]
+
+
+def test_every_subagent_of_a_workflow_that_has_ended_has_finished(tmp_path: Path):
+    session = tmp_path / "-home-me-app" / "s1"
+    _write_agent(session / "subagents" / "workflows" / "wf_1", "a3", IN_RUN)
+    (session / "workflows").mkdir()
+    (session / "workflows" / "wf_1.json").write_text(json.dumps({"status": "killed"}))
+    assert [s.finished for s in subagents.read(tmp_path, "s1", STARTED)] == [True]
 
 
 def test_a_session_without_subagents_has_none(tmp_path: Path):

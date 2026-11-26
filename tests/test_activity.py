@@ -111,5 +111,16 @@ def test_what_its_subagents_did_counts_as_the_sessions_own(tmp_path: Path):
     ]
 
 
+def test_what_the_subagents_of_its_workflows_did_counts_as_the_sessions_own(tmp_path: Path):
+    run = tmp_path / "-home-me-app" / "s1" / "subagents" / "workflows" / "wf_1"
+    run.mkdir(parents=True)
+    (run / "agent-1.jsonl").write_text(
+        "\n".join(lines(call("Write", {"file_path": "/home/me/app/b.py"})))
+    )
+    assert [t.path for t in activity.read(tmp_path, "s1") if isinstance(t, Edited)] == [
+        "/home/me/app/b.py"
+    ]
+
+
 def test_a_session_with_no_transcript_did_nothing(tmp_path: Path):
     assert activity.read(tmp_path, "s1") == []

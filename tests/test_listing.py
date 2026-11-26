@@ -9,7 +9,7 @@ from cli_kit.colour import BOLD, CYAN, GREEN, GREY, RED, RESET, YELLOW, Style
 from claude_sessions import listing, subagents
 from claude_sessions.listing import Session, Subagent
 from claude_sessions.registry import Entry
-from claude_sessions.subagents import Meta
+from claude_sessions.subagents import Meta, Shape
 from claude_sessions.transcript import UNKNOWN, Transcript
 
 NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
@@ -477,13 +477,14 @@ def test_on_a_screen_one_row_high_only_the_summary_shows():
 def test_a_subagent_is_titled_by_what_it_was_asked_to_do_and_found_where_it_last_worked():
     found = subagents.Subagent(
         "a1",
-        Meta("Find the callers", background=False),
+        Meta("Find the callers", Shape.FOREGROUND),
         replace(
             TRANSCRIPT,
             cwd="/home/me/projects/app/.claude/worktrees/a1",
             model="claude-sonnet-5-5",
             context_tokens=9_000,
         ),
+        finished=False,
     )
     assert listing.subagent_directory(found, "/home/me/projects/app") == (
         "/home/me/projects/app/.claude/worktrees/a1"
@@ -501,7 +502,7 @@ def test_a_subagent_is_titled_by_what_it_was_asked_to_do_and_found_where_it_last
 
 
 def test_a_subagent_that_hasnt_said_where_it_is_works_where_its_session_does():
-    found = subagents.Subagent("a1", Meta(None, background=True), UNKNOWN)
+    found = subagents.Subagent("a1", Meta(None, Shape.BACKGROUND), UNKNOWN, finished=False)
     assert listing.subagent_directory(found, "/home/me/projects/app") == "/home/me/projects/app"
     assert listing.subagent(found, "~/projects/app", None).title == "subagent"
 
