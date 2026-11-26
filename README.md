@@ -40,6 +40,10 @@ Built on [cli-kit](../cli-kit).
 
 A session is `done` for 2 minutes after it finishes a turn, so you can see which have work ready for you to look at, then `idle` again. It's done when Claude Code's record says it went idle, by `statusUpdatedAt`, less than 2 minutes ago, it has been given a prompt, and no subagent of it is still at work. That's so whether it runs in an editor's panel or a terminal. Nothing is remembered between runs: a session that finished while you weren't watching the list is idle once 2 minutes have passed.
 
+## Archived
+
+A session you've archived in VS Code or Cursor's Claude Code panel, and that the panel started, has `-archived` after its status, in grey, as in `busy-archived` or `waiting-archived`: the panel no longer shows it, so this list is where you'd see it's still at work or waiting for you. It's ordered, counted and taken as active by its status alone, so `1 busy-archived` counts as `1 busy`. A session you've resumed in a terminal isn't marked, since nothing hides it. While you watch the list, an archived session is closed once it's idle, as below, so `idle-archived` and `done-archived` show only for one that isn't closed yet, such as one whose process has run for under a minute, or in the list printed once, which closes nothing.
+
 ## Closing archived sessions
 
 Archiving a session in VS Code or Cursor's Claude Code panel hides it from the list but leaves its process running, holding a couple of hundred MB. `claude-sessions --close-archived` ends them, with SIGTERM, and lists each one it closed; `claude-sessions --close-archived <path>` only those working in that directory or below it, judged as the list judges them. Watching the list on a terminal does the same every 2 seconds. Each session's history stays in its transcript, to open again from the editor's past sessions.

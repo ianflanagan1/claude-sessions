@@ -22,6 +22,8 @@ _DONE = "done"
 # idle again.
 _DONE_FOR = timedelta(minutes=2)
 _BLANK = "blank"
+# Ends the status of a session archived in its editor.
+_ARCHIVED = "-archived"
 # A subagent listed is running; only its session can be waiting for you.
 _SUBAGENT_STATUS = "busy"
 _SUBAGENT_MARK = "↳ "
@@ -66,6 +68,8 @@ class Session:
     """Its subagents still running, the most recently active first."""
     blank: bool
     """Whether it's idle with nothing said in it yet, as when just opened: counted, not listed."""
+    archived: bool
+    """Whether it's archived in the editor's panel that started it, and so hidden there."""
 
 
 type Row = Session | Subagent
@@ -90,12 +94,14 @@ def session(
     branch: str | None,
     home: str,
     running: Sequence[Subagent],
+    archived: bool,
     now: datetime,
 ) -> Session:
     """A session as listed: in its directory, on branch, under its title, with the subagents it
-    has running. It's blank when idle with no prompt or reply in its transcript and no subagent
-    running; one busy or waiting has been given its first prompt. It's done, as of now, for
-    _DONE_FOR after it goes idle with a turn finished, and no subagent still running."""
+    has running, and archived or not. It's blank when idle with no prompt or reply in its
+    transcript and no subagent running; one busy or waiting has been given its first prompt.
+    It's done, as of now, for _DONE_FOR after it goes idle with a turn finished, and no subagent
+    still running."""
     times = [t for t in (transcript.last_activity, entry.updated) if t is not None]
     return Session(
         status=_DONE if _done(entry, transcript, running, now) else entry.status,
@@ -108,6 +114,7 @@ def session(
         last_active=max(times, default=None),
         subagents=tuple(_by_recency(running)),
         blank=entry.status == _IDLE and not transcript.started and not running,
+        archived=archived,
     )
 
 
@@ -176,10 +183,11 @@ def rows(sessions: Sequence[Session]) -> list[Row]:
 
 
 def render(rows: Sequence[Row], now: datetime, colour: Style, width: int | None) -> list[str]:
-    """A line for each row, in aligned columns: status, how long since it was last active,
-    model, context used, title, where and branch. A subagent is marked as one under its session's
-    title. Where is cut from the left to no fewer than _PROJECT_MIN characters, as far as keeps
-    different places apart. With a width, the titles are cut so each line fits it."""
+    """A line for each row, in aligned columns: status, ending in -archived for an archived
+    session, how long since it was last active, model, context used, title, where and branch.
+    A subagent is marked as one under its session's title. Where is cut from the left to no
+    fewer than _PROJECT_MIN characters, as far as keeps different places apart. With a width,
+    the titles are cut so each line fits it."""
     projects = _abbreviated([r.location for r in rows], _PROJECT_MIN)
     cells = [
         [
@@ -202,16 +210,7 @@ def render(rows: Sequence[Row], now: datetime, colour: Style, width: int | None)
     lines = []
     for r, row in zip(rows, cells, strict=True):
         row[_TITLE] = _fit(row[_TITLE], widths[_TITLE])
-        styles = {
-            _STATUS: _STATUS_COLOUR.get(row[_STATUS], ""),
-            _CONTEXT: _context_colour(r.context_tokens),
-        }
-        cells_shown = [
-            _title_cell(r, row[i], widths[i], colour)
-            if i == _TITLE
-            else _cell(row[i], widths[i], i == _CONTEXT, colour, styles.get(i, ""))
-            for i in shown
-        ]
+        cells_shown = [_styled(i, r, row[i], widths[i], colour) for i in shown]
         # Stripped, so a line doesn't end in the padding of its last columns.
         lines.append(_GAP.join(cells_shown).rstrip())
     return lines
@@ -286,11 +285,25 @@ _STATUS_COLOUR = {"waiting": YELLOW, "done": CYAN, "busy": GREEN, "idle": GREY}
 
 
 def _status(row: Row) -> str:
+    return _plain_status(row) + _archived(row)
+
+
+def _plain_status(row: Row) -> str:
     match row:
         case Session():
             return row.status or _UNKNOWN
         case Subagent():
             return _SUBAGENT_STATUS
+        case _:
+            assert_never(row)
+
+
+def _archived(row: Row) -> str:
+    match row:
+        case Session() if row.archived:
+            return _ARCHIVED
+        case Session() | Subagent():
+            return ""
         case _:
             assert_never(row)
 
@@ -355,6 +368,24 @@ def _cell(text: str, width: int, right: bool, colour: Style, code: str) -> str:
     padding = " " * (width - len(text))
     styled = colour(code, text) if code else text
     return padding + styled if right else styled + padding
+
+
+def _styled(column: int, row: Row, text: str, width: int, colour: Style) -> str:
+    """The cell in column of row's line, text padded to width and coloured."""
+    if column == _STATUS:
+        return _status_cell(row, width, colour)
+    if column == _TITLE:
+        return _title_cell(row, text, width, colour)
+    code = _context_colour(row.context_tokens) if column == _CONTEXT else ""
+    return _cell(text, width, column == _CONTEXT, colour, code)
+
+
+def _status_cell(row: Row, width: int, colour: Style) -> str:
+    """The row's status padded to width, coloured for what it is, and -archived after it grey."""
+    status, archived = _plain_status(row), _archived(row)
+    padding = " " * (width - len(status) - len(archived))
+    shown = colour(_STATUS_COLOUR[status], status) if status in _STATUS_COLOUR else status
+    return shown + (colour(GREY, archived) if archived else "") + padding
 
 
 def _title_cell(row: Row, text: str, width: int, colour: Style) -> str:

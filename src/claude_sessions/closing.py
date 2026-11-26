@@ -9,6 +9,8 @@ from claude_sessions.registry import Entry
 MINIMUM_AGE = timedelta(minutes=1)
 """How long a session's process must have run before it's closed, however long ago the session
 was archived, so one just opened, even from the archived list, is left to settle."""
+# The entrypoint Claude Code records for a session that an editor's panel started.
+_EDITOR_PANEL = "claude-vscode"
 
 
 def closable(
@@ -26,12 +28,18 @@ def closable(
     return [
         entry
         for entry in entries
-        if entry.session_id in archived
+        if archived_in_editor(entry, archived)
         and entry.status == "idle"
         and entry.session_id not in working
-        and entry.entrypoint == "claude-vscode"
         and _settled(entry, processes.get(entry.pid))
     ]
+
+
+def archived_in_editor(entry: Entry, archived: frozenset[str]) -> bool:
+    """Whether the session is archived (archived holds the ids the editors have hidden) in the
+    editor's Claude Code panel that started it. One resumed in a terminal keeps its archived id,
+    but isn't hidden anywhere, so isn't archived."""
+    return entry.session_id in archived and entry.entrypoint == _EDITOR_PANEL
 
 
 def _settled(entry: Entry, process: Process | None) -> bool:

@@ -99,3 +99,16 @@ def test_none_to_close_within_a_directory_says_where():
 
 def test_sessions_closed_within_no_directory_are_counted_as_closed_anywhere():
     assert closing.summary_within(3, None) == "Closed 3 archived sessions."
+
+
+def test_a_session_hidden_in_the_panel_that_started_it_is_archived():
+    assert closing.archived_in_editor(ENTRY, frozenset({"s1"}))
+
+
+def test_a_session_not_hidden_is_not_archived():
+    assert not closing.archived_in_editor(ENTRY, frozenset({"s2"}))
+
+
+def test_a_hidden_session_resumed_in_a_terminal_is_not_archived():
+    assert not closing.archived_in_editor(replace(ENTRY, entrypoint="cli"), frozenset({"s1"}))
+    assert not closing.archived_in_editor(replace(ENTRY, entrypoint=None), frozenset({"s1"}))

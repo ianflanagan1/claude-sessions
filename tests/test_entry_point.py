@@ -273,6 +273,34 @@ def test_close_archived_keeps_an_archived_session_whose_process_has_just_started
         process.kill()
 
 
+def test_printed_once_it_lists_an_archived_session_as_archived_and_closes_nothing(
+    tmp_path: Path,
+):
+    process = sleeper()
+    try:
+        editor_session(tmp_path, process.pid, "s1", "idle")
+        archive_in_editor(tmp_path, ["s1"])
+        result = launch(tmp_path)
+        assert result.returncode == 0, result.stderr
+        [line, count] = result.stdout.splitlines()
+        assert line.startswith("idle-archived  ")
+        assert count == "➖ 1 session (1 idle)."
+        assert process.poll() is None
+    finally:
+        process.kill()
+
+
+def test_a_session_not_archived_is_listed_without_archived(tmp_path: Path):
+    process = sleeper()
+    try:
+        editor_session(tmp_path, process.pid, "s1", "idle")
+        archive_in_editor(tmp_path, ["s2"])
+        [line, _] = launch(tmp_path).stdout.splitlines()
+        assert line.startswith("idle  ")
+    finally:
+        process.kill()
+
+
 def test_close_archived_with_no_editor_state_closes_nothing(tmp_path: Path):
     process = sleeper()
     try:

@@ -11,6 +11,8 @@ The title is the name you gave the session, in bold, or one Claude Code gave it;
 title Claude gave the conversation, which it updates as the conversation moves on.
 
 A session is done for 2 minutes after it finishes a turn, for you to look at, and idle after.
+One archived in VS Code or Cursor's Claude Code panel has -archived after its status, as in
+busy-archived.
 
 On a terminal the list stays on screen, redrawn every 2 seconds, until you press Ctrl-C, and the
 archived sessions --close-archived would close are closed before each redraw. Piped or captured,
@@ -144,7 +146,7 @@ def _place(root: str | None, home: Path) -> str | None:
 def _close_archived(root: str | None) -> outcome.Done | outcome.NothingToDo:
     _check_platform()
     home = Path.home()
-    closed = _close(home, root)
+    closed = _close(home, root, _hidden(home))
     if not closed:
         return outcome.NothingToDo(closing.none_to_close(_place(root, home)))
     return outcome.Done(
@@ -153,25 +155,30 @@ def _close_archived(root: str | None) -> outcome.Done | outcome.NothingToDo:
     )
 
 
-def _close(home: Path, root: str | None) -> list[registry.Entry]:
-    """Ends the running sessions working in root, or anywhere when there's none, archived in an
-    editor, that closing.closable picks, and gives those it ended."""
-    entries = registry.running(home / ".claude" / "sessions")
-    found = archive.archived(
+def _hidden(home: Path) -> frozenset[str]:
+    """The ids of the sessions the editors have archived."""
+    return archive.archived(
         archive.databases(sys.platform, home, os.environ.get("XDG_CONFIG_HOME"))
     )
+
+
+def _close(home: Path, root: str | None, hidden: frozenset[str]) -> list[registry.Entry]:
+    """Ends the running sessions working in root, or anywhere when there's none, archived in an
+    editor (hidden holds the ids archived), that closing.closable picks, and gives those it
+    ended."""
+    entries = registry.running(home / ".claude" / "sessions")
     projects = home / ".claude" / "projects"
     archived = [
         entry
         for entry in entries
-        if entry.session_id in found
+        if closing.archived_in_editor(entry, hidden)
         and _in_scope(listing.directory(entry, transcript.read(projects, entry.session_id)), root)
     ]
     working = frozenset(entry.session_id for entry in archived if _subagents_running(home, entry))
     described = {entry.pid: processes.describe(entry.pid) for entry in archived}
     return [
         entry
-        for entry in closing.closable(archived, found, working, described)
+        for entry in closing.closable(archived, hidden, working, described)
         if processes.terminate(entry.pid)
     ]
 
@@ -260,7 +267,7 @@ _CLEAR_BELOW = "\x1b[J"
 
 def _print(only_active: bool, root: str | None) -> outcome.NothingToDo:
     _check_platform()
-    shown, placed = _gather(only_active, root)
+    shown, placed = _gather(only_active, root, _hidden(Path.home()))
     rows = listing.rows(shown)
     for line in listing.render(rows, datetime.now(UTC), Style.for_stream(sys.stdout), None):
         print(line)
@@ -279,8 +286,9 @@ def _watch(only_active: bool, root: str | None) -> outcome.NothingToDo:
     sys.stdout.write(_ENTER)
     try:
         while True:
-            _close(home, root)
-            shown, placed = _gather(only_active, root)
+            hidden = _hidden(home)
+            _close(home, root, hidden)
+            shown, placed = _gather(only_active, root, hidden)
             rows = listing.rows(shown)
             summary = listing.count_within(placed, _place(root, home))
             size = shutil.get_terminal_size()
@@ -307,10 +315,11 @@ def _interrupt(signum: int, frame: object) -> None:
 
 
 def _gather(
-    only_active: bool, root: str | None
+    only_active: bool, root: str | None, hidden: frozenset[str]
 ) -> tuple[list[listing.Session], list[listing.Session]]:
-    """The sessions to show, in order, and those to count, blank ones among them. With a root,
-    only those working in it or below it are shown and counted. Blank ones aren't shown."""
+    """The sessions to show, in order, and those to count, blank ones among them, each marked
+    archived when an editor has archived it (hidden holds the ids archived). With a root, only
+    those working in it or below it are shown and counted. Blank ones aren't shown."""
     home = Path.home()
     claude = home / ".claude"
     placed = []
@@ -337,7 +346,10 @@ def _gather(
             for s in subagents.running(found, entry.status, told, since)
         ]
         if _in_scope(directory, root):
-            placed.append(listing.session(entry, told, branch(directory), str(home), running, now))
+            archived = closing.archived_in_editor(entry, hidden)
+            placed.append(
+                listing.session(entry, told, branch(directory), str(home), running, archived, now)
+            )
     listed = listing.started(placed)
     shown = listing.ordered(listing.active(listed) if only_active else listed)
     return shown, placed
