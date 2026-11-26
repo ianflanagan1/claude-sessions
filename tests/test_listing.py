@@ -182,9 +182,12 @@ def test_the_count_says_how_many_are_done():
     assert listing.count(sessions) == "3 sessions (1 busy, 1 done, 1 idle)."
 
 
-def test_done_is_cyan():
-    [line] = listing.render([replace(SESSION, status="done")], NOW, Style(enabled=True), None)
-    assert line.startswith(f"{CYAN}done{RESET}  ")
+def test_each_status_has_its_colour():
+    colours = {"waiting": YELLOW, "done": GREEN, "busy": CYAN, "idle": GREY}
+    for status, code in colours.items():
+        session = replace(SESSION, status=status)
+        [line] = listing.render([session], NOW, Style(enabled=True), None)
+        assert line.startswith(f"{code}{status}{RESET}")
 
 
 def test_a_session_archived_in_its_editor_is_marked_archived():
@@ -207,7 +210,7 @@ def test_an_archived_session_whose_status_is_unknown_is_unknown_archived():
 def test_an_archived_status_keeps_its_colour_with_archived_in_grey():
     archived = replace(SESSION, status="busy", archived=True)
     [line] = listing.render([archived], NOW, Style(enabled=True), None)
-    assert line.startswith(f"{GREEN}busy{RESET}{GREY}-archived{RESET}  ")
+    assert line.startswith(f"{CYAN}busy{RESET}{GREY}-archived{RESET}  ")
 
 
 def test_the_status_column_is_as_wide_as_an_archived_status_in_it():

@@ -281,7 +281,7 @@ def _statuses(sessions: Sequence[Session]) -> str:
     return ", ".join(parts)
 
 
-_STATUS_COLOUR = {"waiting": YELLOW, "done": CYAN, "busy": GREEN, "idle": GREY}
+_STATUS_COLOUR = {"waiting": YELLOW, "done": GREEN, "busy": CYAN, "idle": GREY}
 
 
 def _status(row: Row) -> str:
