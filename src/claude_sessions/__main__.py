@@ -2,21 +2,24 @@
 
 Lists each session on its own line: its status, how long since it was last active, its model,
 how much of its context it has used, its title, the directory it last worked in, cut from the left
-when long, and its git branch. Sessions waiting for you come first, then busy ones, then idle
-ones, each most recently active first. A session's subagents still running are listed under it,
-marked ↳, but aren't counted as sessions. A session that's idle with nothing said in it yet, as
-when just opened, isn't listed, but is counted as blank.
+when long, and its git branch. Sessions waiting for you come first, then those just done, then busy
+ones, then idle ones, each most recently active first. A session's subagents still running are
+listed under it, marked ↳, but aren't counted as sessions. A session that's idle with nothing
+said in it yet, as when just opened, isn't listed, but is counted as blank.
 
 The title is the name you gave the session, in bold, or one Claude Code gave it; otherwise the
 title Claude gave the conversation, which it updates as the conversation moves on.
 
+A session is done for 2 minutes after it finishes a turn, for you to look at, and idle after.
+
 On a terminal the list stays on screen, redrawn every 2 seconds, until you press Ctrl-C, and the
 archived sessions --close-archived would close are closed before each redraw. Piped or captured,
-it's printed once, and closes nothing. `claude-sessions <path>` lists only the sessions working
-in path or below it: `claude-sessions .` those working here.
+it's printed once, and closes nothing. `claude-sessions <path>` lists, counts and closes only the
+sessions working in path or below it: `claude-sessions .` those working here.
 
-`claude-sessions --close-archived` ends the sessions you've archived in VS Code or Cursor's Claude
-Code panel: archiving there hides a session but leaves it running. Only idle ones are closed,
+`claude-sessions --close-archived [<path>]` ends the sessions you've archived in VS Code or
+Cursor's Claude Code panel, only those working in path or below it when given one: archiving
+there hides a session but leaves it running. Only idle ones are closed,
 never one busy or waiting for you, nor one with a subagent still running, nor one you've since
 resumed in a terminal, nor one whose process has run for under a minute. Each closed session's
 history stays on disk, to open again from the editor's list of past sessions.
@@ -75,8 +78,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "path",
         nargs="?",
-        help="list only sessions working in this directory or below it, . for here; with "
-        "--changes, a directory in the repository, here by default",
+        help="list, count and close only sessions working in this directory or below it, . for "
+        "here; with --changes, a directory in the repository, here by default",
     )
     parser.add_argument(
         "-a",
@@ -105,10 +108,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--json goes with --changes")
     if args.active and (args.changes or args.close_archived):
         parser.error("--active goes only with the list of sessions")
-    if args.close_archived and args.path is not None:
-        parser.error("--close-archived takes no path")
     if args.close_archived:
-        return cli.finish("claude-sessions --close-archived", _close_archived)
+        return cli.finish(
+            "claude-sessions --close-archived", lambda: _close_archived(_root(args.path))
+        )
     if args.changes:
         repo = args.path or "."
         if args.json:
@@ -127,25 +130,43 @@ def _root(path: str | None) -> str | None:
     return os.path.realpath(path)
 
 
-def _close_archived() -> outcome.Done | outcome.NothingToDo:
+def _in_scope(directory: str | None, root: str | None) -> bool:
+    """Whether a session working in directory is one to list, count and close, its symbolic links
+    resolved as root's are."""
+    return listing.in_scope(None if directory is None else os.path.realpath(directory), root)
+
+
+def _place(root: str | None, home: Path) -> str | None:
+    """root as the summaries name it, with home written as ~."""
+    return None if root is None else listing.from_home(root, str(home))
+
+
+def _close_archived(root: str | None) -> outcome.Done | outcome.NothingToDo:
     _check_platform()
-    closed = _close(Path.home())
+    home = Path.home()
+    closed = _close(home, root)
     if not closed:
-        return outcome.NothingToDo("No archived sessions to close.")
+        return outcome.NothingToDo(closing.none_to_close(_place(root, home)))
     return outcome.Done(
-        closing.summary(len(closed)),
+        closing.summary_within(len(closed), _place(root, home)),
         *(f"{entry.name or entry.session_id} (pid {entry.pid})" for entry in closed),
     )
 
 
-def _close(home: Path) -> list[registry.Entry]:
-    """Ends the running sessions archived in an editor that closing.closable picks, and gives
-    those it ended."""
+def _close(home: Path, root: str | None) -> list[registry.Entry]:
+    """Ends the running sessions working in root, or anywhere when there's none, archived in an
+    editor, that closing.closable picks, and gives those it ended."""
     entries = registry.running(home / ".claude" / "sessions")
     found = archive.archived(
         archive.databases(sys.platform, home, os.environ.get("XDG_CONFIG_HOME"))
     )
-    archived = [entry for entry in entries if entry.session_id in found]
+    projects = home / ".claude" / "projects"
+    archived = [
+        entry
+        for entry in entries
+        if entry.session_id in found
+        and _in_scope(listing.directory(entry, transcript.read(projects, entry.session_id)), root)
+    ]
     working = frozenset(entry.session_id for entry in archived if _subagents_running(home, entry))
     described = {entry.pid: processes.describe(entry.pid) for entry in archived}
     return [
@@ -239,17 +260,17 @@ _CLEAR_BELOW = "\x1b[J"
 
 def _print(only_active: bool, root: str | None) -> outcome.NothingToDo:
     _check_platform()
-    shown, sessions = _gather(only_active, root)
+    shown, placed = _gather(only_active, root)
     rows = listing.rows(shown)
     for line in listing.render(rows, datetime.now(UTC), Style.for_stream(sys.stdout), None):
         print(line)
-    return outcome.NothingToDo(listing.count(sessions))
+    return outcome.NothingToDo(listing.count_within(placed, _place(root, Path.home())))
 
 
 def _watch(only_active: bool, root: str | None) -> outcome.NothingToDo:
-    """Closes the archived sessions closing.closable picks and redraws the list on the alternate
-    screen, until Ctrl-C or SIGTERM, then leaves the screen as it was, for cli.finish to print
-    the last count under."""
+    """Closes the archived sessions working in root that closing.closable picks and redraws the
+    list on the alternate screen, until Ctrl-C or SIGTERM, then leaves the screen as it was, for
+    cli.finish to print the last count under."""
     _check_platform()
     signal.signal(signal.SIGTERM, _interrupt)
     colour = Style.for_stream(sys.stdout)
@@ -258,10 +279,10 @@ def _watch(only_active: bool, root: str | None) -> outcome.NothingToDo:
     sys.stdout.write(_ENTER)
     try:
         while True:
-            _close(home)
-            shown, sessions = _gather(only_active, root)
+            _close(home, root)
+            shown, placed = _gather(only_active, root)
             rows = listing.rows(shown)
-            summary = listing.count(sessions)
+            summary = listing.count_within(placed, _place(root, home))
             size = shutil.get_terminal_size()
             # Only the lines on screen set the columns' widths.
             fit = rows[: listing.fitting(len(rows), size.lines)]
@@ -288,11 +309,10 @@ def _interrupt(signum: int, frame: object) -> None:
 def _gather(
     only_active: bool, root: str | None
 ) -> tuple[list[listing.Session], list[listing.Session]]:
-    """The sessions to show, in order, and every session running, to count. Blank ones aren't
-    shown. With a root, only those working in it or below it are shown."""
+    """The sessions to show, in order, and those to count, blank ones among them. With a root,
+    only those working in it or below it are shown and counted. Blank ones aren't shown."""
     home = Path.home()
     claude = home / ".claude"
-    sessions = []
     placed = []
     branches: dict[str, str | None] = {}  # Many sessions share a directory; ask git once for each.
 
@@ -303,7 +323,9 @@ def _gather(
             branches[directory] = git.branch(directory)
         return branches[directory]
 
-    for entry in registry.running(claude / "sessions"):
+    entries = registry.running(claude / "sessions")
+    now = datetime.now(UTC)
+    for entry in entries:
         told = transcript.read(claude / "projects", entry.session_id)
         directory = listing.directory(entry, told)
         since = processes.started_at(entry.process_started)
@@ -314,15 +336,11 @@ def _gather(
             )
             for s in subagents.running(found, entry.status, told, since)
         ]
-        listed = listing.session(entry, told, branch(directory), str(home), running)
-        sessions.append(listed)
-        if root is None or (
-            directory is not None and listing.within(os.path.realpath(directory), root)
-        ):
-            placed.append(listed)
+        if _in_scope(directory, root):
+            placed.append(listing.session(entry, told, branch(directory), str(home), running, now))
     listed = listing.started(placed)
     shown = listing.ordered(listing.active(listed) if only_active else listed)
-    return shown, sessions
+    return shown, placed
 
 
 if __name__ == "__main__":

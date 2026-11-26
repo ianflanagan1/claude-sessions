@@ -4,7 +4,7 @@ import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
-from cli_kit.colour import BOLD, GREEN, GREY, RED, RESET, YELLOW, Style
+from cli_kit.colour import BOLD, CYAN, GREEN, GREY, RED, RESET, YELLOW, Style
 
 from claude_sessions import listing, subagents
 from claude_sessions.listing import Session, Subagent
@@ -23,6 +23,7 @@ ENTRY = Entry(
     name="app-86",
     named_by="derived",
     updated=NOW - timedelta(hours=3),
+    status_changed=NOW - timedelta(hours=3),
     entrypoint="claude-vscode",
     process_started="Fri Oct 30 06:38:10 2026",
 )
@@ -51,7 +52,7 @@ SESSION = Session(
 
 
 def test_a_session_is_titled_by_claude_and_found_where_it_last_worked():
-    assert listing.session(ENTRY, TRANSCRIPT, "main", "/home/me", []) == SESSION
+    assert listing.session(ENTRY, TRANSCRIPT, "main", "/home/me", [], NOW) == SESSION
 
 
 HELPER = Subagent(
@@ -71,18 +72,18 @@ def test_its_directory_is_where_it_last_worked_else_where_it_started():
 
 def test_a_name_you_gave_the_session_is_its_title():
     entry = replace(ENTRY, name="list sessions", named_by="user")
-    session = listing.session(entry, TRANSCRIPT, "main", "/home/me", [])
+    session = listing.session(entry, TRANSCRIPT, "main", "/home/me", [], NOW)
     assert (session.title, session.user_named) == ("list sessions", True)
 
 
 def test_a_name_claude_code_gave_it_is_its_title_but_not_yours():
     entry = replace(ENTRY, name="Assess PHP", named_by="auto")
-    session = listing.session(entry, TRANSCRIPT, "main", "/home/me", [])
+    session = listing.session(entry, TRANSCRIPT, "main", "/home/me", [], NOW)
     assert (session.title, session.user_named) == ("Assess PHP", False)
 
 
 def test_without_a_transcript_it_is_where_it_started_and_named_after_its_directory():
-    session = listing.session(ENTRY, UNKNOWN, None, "/home/me", [])
+    session = listing.session(ENTRY, UNKNOWN, None, "/home/me", [], NOW)
     assert session == Session(
         status="idle",
         location="~/projects/app",
@@ -99,21 +100,21 @@ def test_without_a_transcript_it_is_where_it_started_and_named_after_its_directo
 
 def test_an_idle_session_with_nothing_said_in_it_is_blank():
     unsaid = replace(TRANSCRIPT, started=False)
-    assert listing.session(ENTRY, unsaid, None, "/home/me", []).blank
+    assert listing.session(ENTRY, unsaid, None, "/home/me", [], NOW).blank
 
 
 def test_a_session_with_a_prompt_or_reply_in_it_is_not_blank():
-    assert not listing.session(ENTRY, TRANSCRIPT, None, "/home/me", []).blank
+    assert not listing.session(ENTRY, TRANSCRIPT, None, "/home/me", [], NOW).blank
 
 
 def test_a_session_busy_or_waiting_on_its_first_prompt_is_not_blank():
     for status in ("busy", "waiting", None):
         entry = replace(ENTRY, status=status)
-        assert not listing.session(entry, UNKNOWN, None, "/home/me", []).blank
+        assert not listing.session(entry, UNKNOWN, None, "/home/me", [], NOW).blank
 
 
 def test_a_session_with_subagents_running_is_not_blank():
-    assert not listing.session(ENTRY, UNKNOWN, None, "/home/me", [HELPER]).blank
+    assert not listing.session(ENTRY, UNKNOWN, None, "/home/me", [HELPER], NOW).blank
 
 
 def test_blank_sessions_are_not_listed():
@@ -121,19 +122,79 @@ def test_blank_sessions_are_not_listed():
     assert listing.started([SESSION, blank]) == [SESSION]
 
 
+def test_a_session_idle_for_under_two_minutes_is_done():
+    entry = replace(ENTRY, status_changed=NOW - timedelta(seconds=119))
+    assert listing.session(entry, TRANSCRIPT, "main", "/home/me", [], NOW) == replace(
+        SESSION, status="done"
+    )
+
+
+def test_a_session_idle_for_two_minutes_or_more_is_idle():
+    entry = replace(ENTRY, status_changed=NOW - timedelta(minutes=2))
+    assert listing.session(entry, TRANSCRIPT, "main", "/home/me", [], NOW).status == "idle"
+
+
+def test_a_session_busy_or_waiting_since_a_moment_ago_is_not_done():
+    for status in ("busy", "waiting"):
+        entry = replace(ENTRY, status=status, status_changed=NOW - timedelta(seconds=5))
+        assert listing.session(entry, TRANSCRIPT, "main", "/home/me", [], NOW).status == status
+
+
+def test_a_session_just_opened_with_nothing_said_in_it_is_not_done():
+    entry = replace(ENTRY, status_changed=NOW - timedelta(seconds=5))
+    unsaid = replace(TRANSCRIPT, started=False)
+    assert listing.session(entry, unsaid, "main", "/home/me", [], NOW).status == "idle"
+
+
+def test_a_session_whose_subagent_is_still_at_work_is_not_done():
+    entry = replace(ENTRY, status_changed=NOW - timedelta(seconds=5))
+    assert listing.session(entry, TRANSCRIPT, "main", "/home/me", [HELPER], NOW).status == "idle"
+
+
+def test_a_session_whose_status_change_is_unknown_is_not_done():
+    entry = replace(ENTRY, status_changed=None)
+    assert listing.session(entry, TRANSCRIPT, "main", "/home/me", [], NOW).status == "idle"
+
+
+def test_done_sessions_come_after_those_waiting_and_before_those_busy():
+    waiting = replace(SESSION, status="waiting", title="waiting")
+    done = replace(SESSION, status="done", title="done", last_active=NOW - timedelta(days=1))
+    busy = replace(SESSION, status="busy", title="busy")
+    titles = [s.title for s in listing.ordered([SESSION, busy, done, waiting])]
+    assert titles == ["waiting", "done", "busy", "Fixing the login form"]
+
+
+def test_a_done_session_is_active():
+    assert listing.active([SESSION, replace(SESSION, status="done")]) == [
+        replace(SESSION, status="done")
+    ]
+
+
+def test_the_count_says_how_many_are_done():
+    sessions = [SESSION, replace(SESSION, status="done"), replace(SESSION, status="busy")]
+    assert listing.count(sessions) == "3 sessions (1 done, 1 busy, 1 idle)."
+
+
+def test_done_is_cyan():
+    [line] = listing.render([replace(SESSION, status="done")], NOW, Style(enabled=True), None)
+    assert line.startswith(f"{CYAN}done{RESET}  ")
+
+
 def test_a_status_change_after_its_latest_message_is_its_latest_activity():
     entry = replace(ENTRY, updated=NOW - timedelta(minutes=1))
-    assert listing.session(entry, TRANSCRIPT, "main", "/home/me", []).last_active == entry.updated
+    assert (
+        listing.session(entry, TRANSCRIPT, "main", "/home/me", [], NOW).last_active == entry.updated
+    )
 
 
 def test_a_directory_outside_home_is_shown_in_full():
     entry = replace(ENTRY, cwd="/srv/app")
-    assert listing.session(entry, UNKNOWN, None, "/home/me", []).location == "/srv/app"
+    assert listing.session(entry, UNKNOWN, None, "/home/me", [], NOW).location == "/srv/app"
 
 
 def test_a_directory_beside_home_with_the_same_prefix_is_not_in_it():
     entry = replace(ENTRY, cwd="/home/meg/app")
-    assert listing.session(entry, UNKNOWN, None, "/home/me", []).location == "/home/meg/app"
+    assert listing.session(entry, UNKNOWN, None, "/home/me", [], NOW).location == "/home/meg/app"
 
 
 def test_sessions_needing_you_come_first_then_working_then_the_most_recently_active():
@@ -255,20 +316,20 @@ def test_how_long_ago_reads_in_the_largest_whole_unit():
 
 def test_the_count_says_how_many_are_in_each_status():
     sessions = [SESSION, SESSION, replace(SESSION, status="busy"), replace(SESSION, status=None)]
-    assert listing.count(sessions) == "4 sessions: 1 busy, 2 idle, 1 unknown."
+    assert listing.count(sessions) == "4 sessions (1 busy, 2 idle, 1 unknown)."
 
 
 def test_the_count_says_how_many_are_blank_apart_from_their_status():
     sessions = [SESSION, replace(SESSION, blank=True), replace(SESSION, status="busy")]
-    assert listing.count(sessions) == "3 sessions: 1 busy, 1 idle, 1 blank."
+    assert listing.count(sessions) == "3 sessions (1 busy, 1 idle, 1 blank)."
 
 
 def test_the_count_of_only_blank_sessions_says_so():
-    assert listing.count([replace(SESSION, blank=True)]) == "1 session: 1 blank."
+    assert listing.count([replace(SESSION, blank=True)]) == "1 session (1 blank)."
 
 
 def test_the_count_of_one_session_is_singular():
-    assert listing.count([SESSION]) == "1 session: 1 idle."
+    assert listing.count([SESSION]) == "1 session (1 idle)."
 
 
 def test_the_count_of_no_sessions_says_none_are_running():
@@ -327,7 +388,7 @@ def test_a_subagent_that_hasnt_said_where_it_is_works_where_its_session_does():
 
 def test_a_sessions_subagents_are_listed_the_most_recently_active_first():
     older = replace(HELPER, title="older", last_active=NOW - timedelta(minutes=9))
-    session = listing.session(ENTRY, TRANSCRIPT, "main", "/home/me", [older, HELPER])
+    session = listing.session(ENTRY, TRANSCRIPT, "main", "/home/me", [older, HELPER], NOW)
     assert session.subagents == (HELPER, older)
 
 
@@ -357,7 +418,7 @@ def test_a_session_with_subagents_running_is_active_whatever_its_own_status():
 
 
 def test_subagents_arent_counted_as_sessions():
-    assert listing.count([replace(SESSION, subagents=(HELPER,))]) == "1 session: 1 idle."
+    assert listing.count([replace(SESSION, subagents=(HELPER,))]) == "1 session (1 idle)."
 
 
 def test_a_directory_is_within_itself():
@@ -374,3 +435,50 @@ def test_a_directory_beside_another_with_the_same_prefix_is_not_within_it():
 
 def test_every_directory_is_within_the_root():
     assert listing.within("/home/me", "/")
+
+
+def test_with_no_directory_given_every_session_is_in_scope():
+    assert listing.in_scope("/srv/app", None)
+
+
+def test_a_session_working_below_the_directory_given_is_in_scope():
+    assert listing.in_scope("/home/me/app/src", "/home/me/app")
+
+
+def test_a_session_working_elsewhere_is_out_of_scope():
+    assert not listing.in_scope("/home/me/apple", "/home/me/app")
+
+
+def test_a_session_whose_directory_is_unknown_is_out_of_scope_of_a_directory():
+    assert not listing.in_scope(None, "/home/me/app")
+
+
+def test_the_count_within_a_directory_is_of_only_the_sessions_there():
+    sessions = [replace(SESSION, status="busy"), SESSION]
+    assert (
+        listing.count_within(sessions, "~/projects/app")
+        == "~/projects/app: 2 sessions (1 busy, 1 idle)."
+    )
+
+
+def test_the_count_within_a_directory_says_how_many_there_are_blank():
+    sessions = [SESSION, replace(SESSION, blank=True)]
+    assert (
+        listing.count_within(sessions, "~/projects/app")
+        == "~/projects/app: 2 sessions (1 idle, 1 blank)."
+    )
+
+
+def test_the_count_of_one_session_within_a_directory_is_singular():
+    assert (
+        listing.count_within([SESSION], "~/projects/app") == "~/projects/app: 1 session (1 idle)."
+    )
+
+
+def test_the_count_within_a_directory_with_no_sessions_there_says_so():
+    assert listing.count_within([], "~/projects/app") == "~/projects/app: No sessions."
+
+
+def test_the_count_within_no_directory_is_the_count_of_every_session():
+    sessions = [replace(SESSION, status="busy"), SESSION]
+    assert listing.count_within(sessions, None) == "2 sessions (1 busy, 1 idle)."

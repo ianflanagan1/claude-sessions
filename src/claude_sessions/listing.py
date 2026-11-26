@@ -3,20 +3,24 @@
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import assert_never, final
 
-from cli_kit.colour import BOLD, GREEN, GREY, RED, YELLOW, Style
+from cli_kit.colour import BOLD, CYAN, GREEN, GREY, RED, YELLOW, Style
 
 from claude_sessions import subagents
 from claude_sessions.registry import Entry
 from claude_sessions.transcript import Transcript
 
 # Statuses in the order they're listed and counted; any other comes after them.
-_ORDER = ("waiting", "busy", "idle")
-_ACTIVE = ("waiting", "busy")
+_ORDER = ("waiting", "done", "busy", "idle")
+_ACTIVE = ("waiting", "done", "busy")
 _UNKNOWN = "unknown"
 _IDLE = "idle"
+_DONE = "done"
+# How long a session that has finished a turn is listed as done, for you to look at, before it's
+# idle again.
+_DONE_FOR = timedelta(minutes=2)
 _BLANK = "blank"
 # A subagent listed is running; only its session can be waiting for you.
 _SUBAGENT_STATUS = "busy"
@@ -50,6 +54,7 @@ class Subagent:
 @dataclass(frozen=True)
 class Session:
     status: str | None
+    """Claude Code's status for it, or done for _DONE_FOR after it finishes a turn."""
     location: str
     branch: str | None
     model: str | None
@@ -85,13 +90,15 @@ def session(
     branch: str | None,
     home: str,
     running: Sequence[Subagent],
+    now: datetime,
 ) -> Session:
     """A session as listed: in its directory, on branch, under its title, with the subagents it
     has running. It's blank when idle with no prompt or reply in its transcript and no subagent
-    running; one busy or waiting has been given its first prompt."""
+    running; one busy or waiting has been given its first prompt. It's done, as of now, for
+    _DONE_FOR after it goes idle with a turn finished, and no subagent still running."""
     times = [t for t in (transcript.last_activity, entry.updated) if t is not None]
     return Session(
-        status=entry.status,
+        status=_DONE if _done(entry, transcript, running, now) else entry.status,
         location=from_home(directory(entry, transcript) or "?", home),
         branch=branch,
         model=transcript.model,
@@ -101,6 +108,16 @@ def session(
         last_active=max(times, default=None),
         subagents=tuple(_by_recency(running)),
         blank=entry.status == _IDLE and not transcript.started and not running,
+    )
+
+
+def _done(entry: Entry, transcript: Transcript, running: Sequence[Subagent], now: datetime) -> bool:
+    return (
+        entry.status == _IDLE
+        and transcript.started
+        and not running
+        and entry.status_changed is not None
+        and now - entry.status_changed < _DONE_FOR
     )
 
 
@@ -125,8 +142,8 @@ def subagent(
 
 
 def ordered(sessions: Sequence[Session]) -> list[Session]:
-    """Waiting for you, then busy, then idle, then any other status; within each, the most
-    recently active first."""
+    """Waiting for you, then done, then busy, then idle, then any other status; within each, the
+    most recently active first."""
     return sorted(_by_recency(sessions), key=lambda s: _rank(s.status))
 
 
@@ -136,13 +153,21 @@ def started(sessions: Sequence[Session]) -> list[Session]:
 
 
 def active(sessions: Sequence[Session]) -> list[Session]:
-    """The sessions waiting for you or busy, or with subagents running."""
+    """The sessions waiting for you, done, or busy, or with subagents running."""
     return [s for s in sessions if s.status in _ACTIVE or s.subagents]
 
 
 def within(path: str, root: str) -> bool:
     """Whether path is root or a directory below it."""
     return path == root or path.startswith(root.rstrip("/") + "/")
+
+
+def in_scope(directory: str | None, root: str | None) -> bool:
+    """Whether a session working in directory is one to list, count and close: with no root
+    given, every session is; with one, those working in it or below it."""
+    if root is None:
+        return True
+    return directory is not None and within(directory, root)
 
 
 def rows(sessions: Sequence[Session]) -> list[Row]:
@@ -227,17 +252,37 @@ def count(sessions: Sequence[Session]) -> str:
     from their status."""
     if not sessions:
         return "No sessions running."
+    return f"{len(sessions)} {_sessions(len(sessions))} ({_statuses(sessions)})."
+
+
+def count_within(sessions: Sequence[Session], place: str | None) -> str:
+    """How many sessions there are working in place, and how many in each status, then how many
+    are blank, apart from their status. With no place, sessions are every session running,
+    counted as count counts them."""
+    if place is None:
+        return count(sessions)
+    if not sessions:
+        return f"{place}: No sessions."
+    n = len(sessions)
+    return f"{place}: {n} {_sessions(n)} ({_statuses(sessions)})."
+
+
+def _sessions(n: int) -> str:
+    return "session" if n == 1 else "sessions"
+
+
+def _statuses(sessions: Sequence[Session]) -> str:
+    """How many of sessions are in each status, then how many are blank."""
     listed = started(sessions)
     statuses = Counter(s.status or _UNKNOWN for s in listed)
     parts = [f"{statuses[s]} {s}" for s in sorted(statuses, key=_rank)]
     blank = len(sessions) - len(listed)
     if blank:
         parts.append(f"{blank} {_BLANK}")
-    noun = "session" if len(sessions) == 1 else "sessions"
-    return f"{len(sessions)} {noun}: {', '.join(parts)}."
+    return ", ".join(parts)
 
 
-_STATUS_COLOUR = {"waiting": YELLOW, "busy": GREEN, "idle": GREY}
+_STATUS_COLOUR = {"waiting": YELLOW, "done": CYAN, "busy": GREEN, "idle": GREY}
 
 
 def _status(row: Row) -> str:

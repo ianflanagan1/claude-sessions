@@ -74,7 +74,7 @@ def test_it_lists_the_running_sessions_with_their_titles(tmp_path: Path):
     [line, count] = result.stdout.splitlines()
     assert line.startswith("busy  ")
     assert line.endswith("  Fixing the login form  ~")
-    assert count == "➖ 1 session: 1 busy."
+    assert count == "➖ 1 session (1 busy)."
 
 
 def test_a_session_whose_process_has_ended_is_not_listed(tmp_path: Path):
@@ -89,7 +89,7 @@ def test_active_lists_only_the_sessions_waiting_or_busy_but_counts_them_all(tmp_
     lines = launch(tmp_path, "--active").stdout.splitlines()
     assert len(lines) == 2
     assert "Asking" in lines[0]
-    assert lines[1] == "➖ 2 sessions: 1 waiting, 1 idle."
+    assert lines[1] == "➖ 2 sessions (1 waiting, 1 idle)."
 
 
 def test_a_session_with_nothing_said_in_it_yet_is_counted_as_blank_but_not_listed(
@@ -103,7 +103,7 @@ def test_a_session_with_nothing_said_in_it_yet_is_counted_as_blank_but_not_liste
     assert result.returncode == 0, result.stderr
     [line, count] = result.stdout.splitlines()
     assert "Fixing the login form" in line
-    assert count == "➖ 2 sessions: 1 idle, 1 blank."
+    assert count == "➖ 2 sessions (1 idle, 1 blank)."
 
 
 def test_a_path_lists_only_the_sessions_working_in_that_directory_or_below_it(tmp_path: Path):
@@ -117,7 +117,7 @@ def test_a_path_lists_only_the_sessions_working_in_that_directory_or_below_it(tm
     lines = result.stdout.splitlines()
     assert len(lines) == 2
     assert "In the app" in lines[0]
-    assert lines[1] == "➖ 2 sessions: 1 busy, 1 idle."
+    assert lines[1] == "➖ ~/projects/app: 1 session (1 idle)."
 
 
 def test_a_relative_path_is_from_the_current_directory(tmp_path: Path):
@@ -152,10 +152,25 @@ def test_active_is_only_for_the_list(tmp_path: Path):
     assert "--active" in result.stderr
 
 
-def test_close_archived_takes_no_path(tmp_path: Path):
-    result = launch(tmp_path, "--close-archived", ".")
-    assert result.returncode == 2
-    assert "path" in result.stderr
+def test_close_archived_with_a_path_leaves_the_sessions_working_elsewhere(tmp_path: Path):
+    app = tmp_path / "app"
+    app.mkdir()
+    process = sleeper()
+    try:
+        editor_session(tmp_path, process.pid, "s1", "idle")
+        archive_in_editor(tmp_path, ["s1"])
+        result = launch(tmp_path, "--close-archived", str(app))
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "➖ No archived sessions in ~/app to close.\n"
+        assert process.poll() is None
+    finally:
+        process.kill()
+
+
+def test_close_archived_with_a_path_that_isnt_a_directory_says_so(tmp_path: Path):
+    result = launch(tmp_path, "--close-archived", str(tmp_path / "missing"))
+    assert result.returncode != 0
+    assert "isn't a directory" in result.stdout + result.stderr
 
 
 def test_with_no_sessions_it_says_so(tmp_path: Path):
@@ -181,27 +196,28 @@ def test_a_background_subagent_still_running_is_listed_under_its_idle_session(tm
     assert "session s1" in session_line
     assert subagent_line.startswith("busy  now  ")
     assert "↳ Transition fields on move" in subagent_line
-    assert count == "➖ 1 session: 1 idle."
+    assert count == "➖ 1 session (1 idle)."
 
 
 def test_on_a_terminal_it_redraws_the_list_as_sessions_change_until_interrupted(tmp_path: Path):
     session(tmp_path, os.getpid(), "s1", "busy", "Fixing the login form")
     terminal, its_end = os.openpty()
     env = os.environ | {"HOME": str(tmp_path), "NO_COLOR": "1"}
+    env.pop("XDG_CONFIG_HOME", None)
     process = subprocess.Popen([BIN], stdin=its_end, stdout=its_end, stderr=its_end, env=env)
     os.close(its_end)
     try:
-        first = read_until(terminal, "1 session: 1 busy.")
+        first = read_until(terminal, "1 session (1 busy).")
         assert first.startswith("\x1b[?1049h")
         assert "Fixing the login form" in first
 
         session(tmp_path, os.getpid(), "s1", "waiting", "Fixing the login form")
-        read_until(terminal, "1 session: 1 waiting.")
+        read_until(terminal, "1 session (1 waiting).")
 
         process.send_signal(signal.SIGINT)
         # Read before the process ends: macOS drops what's unread once it closes the terminal.
-        last = read_until(terminal, "➖ 1 session: 1 waiting.")
-        assert "\x1b[?1049l➖ 1 session: 1 waiting." in last
+        last = read_until(terminal, "➖ 1 session (1 waiting).")
+        assert "\x1b[?1049l➖ 1 session (1 waiting)." in last
         assert process.wait(timeout=WAIT_SECONDS) == 0
     finally:
         process.kill()
@@ -220,9 +236,9 @@ def test_on_a_terminal_it_keeps_an_archived_session_whose_process_has_just_start
     watcher = subprocess.Popen([BIN], stdin=its_end, stdout=its_end, stderr=its_end, env=env)
     os.close(its_end)
     try:
-        read_until(terminal, "1 session: 1 idle.")
+        read_until(terminal, "1 session (1 idle).")
         watcher.send_signal(signal.SIGINT)
-        last = read_until(terminal, "➖ 1 session: 1 idle.")
+        last = read_until(terminal, "➖ 1 session (1 idle).")
         assert "Closed" not in last
         assert watcher.wait(timeout=WAIT_SECONDS) == 0
         assert process.poll() is None
@@ -305,6 +321,31 @@ def archive_in_editor(home: Path, session_ids: list[str]) -> None:
             ("Anthropic.claude-code", json.dumps({"hiddenSessionIds": session_ids})),
         )
     connection.close()
+
+
+def went(home: Path, pid: int, status: str, ago: timedelta) -> None:
+    """Changes the status of the session pid runs, as Claude Code does, ago."""
+    record_file = home / ".claude" / "sessions" / f"{pid}.json"
+    at = round((time.time() - ago.total_seconds()) * 1000)
+    record = json.loads(record_file.read_text()) | {"status": status, "statusUpdatedAt": at}
+    record_file.write_text(json.dumps(record))
+
+
+def test_a_session_that_has_just_finished_a_turn_is_done(tmp_path: Path):
+    session(tmp_path, os.getpid(), "s1", "busy", "Fixing the login form")
+    went(tmp_path, os.getpid(), "idle", timedelta(0))
+    result = launch(tmp_path)
+    assert result.returncode == 0, result.stderr
+    [line, count] = result.stdout.splitlines()
+    assert line.startswith("done  ")
+    assert count == "➖ 1 session (1 done)."
+    assert "Fixing the login form" in launch(tmp_path, "--active").stdout
+
+
+def test_a_session_idle_for_two_minutes_is_idle_again(tmp_path: Path):
+    session(tmp_path, os.getpid(), "s1", "busy", "Fixing the login form")
+    went(tmp_path, os.getpid(), "idle", timedelta(minutes=2))
+    assert launch(tmp_path).stdout.startswith("idle  ")
 
 
 def test_changes_tells_which_running_session_edited_each_uncommitted_file(tmp_path: Path):

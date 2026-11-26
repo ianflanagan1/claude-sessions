@@ -16,6 +16,7 @@ ENTRY = Entry(
     name="app-86",
     named_by="derived",
     updated=None,
+    status_changed=None,
     entrypoint="claude-vscode",
     process_started=STARTED,
 )
@@ -76,3 +77,25 @@ def test_one_closed_session_is_counted_singly():
 
 def test_several_closed_sessions_are_counted():
     assert closing.summary(3) == "Closed 3 archived sessions."
+
+
+def test_sessions_closed_within_a_directory_are_counted_there():
+    assert (
+        closing.summary_within(3, "~/projects/app")
+        == "Closed 3 archived sessions in ~/projects/app."
+    )
+
+
+def test_none_to_close_says_so():
+    assert closing.none_to_close(None) == "No archived sessions to close."
+
+
+def test_none_to_close_within_a_directory_says_where():
+    assert (
+        closing.none_to_close("~/projects/app")
+        == "No archived sessions in ~/projects/app to close."
+    )
+
+
+def test_sessions_closed_within_no_directory_are_counted_as_closed_anywhere():
+    assert closing.summary_within(3, None) == "Closed 3 archived sessions."

@@ -23,6 +23,8 @@ class Entry:
     named_by: str | None
     """Who chose the name: derived from the directory, auto by Claude Code, or user."""
     updated: datetime | None
+    status_changed: datetime | None
+    """When its status last changed, as to idle when a turn ends."""
     entrypoint: str | None
     """What started the session: claude-vscode for a VS Code or Cursor panel, cli for a terminal."""
     process_started: str | None
@@ -39,7 +41,6 @@ def parse(record: object) -> Entry | None:
     session_id = record.get("sessionId")
     if not isinstance(pid, int) or not isinstance(session_id, str):
         return None
-    updated = record.get("updatedAt")
     return Entry(
         pid=pid,
         session_id=session_id,
@@ -47,9 +48,8 @@ def parse(record: object) -> Entry | None:
         status=_text(record, "status"),
         name=_text(record, "name"),
         named_by=_text(record, "nameSource"),
-        updated=datetime.fromtimestamp(updated / 1000, UTC)
-        if isinstance(updated, int | float)
-        else None,
+        updated=_time(record, "updatedAt"),
+        status_changed=_time(record, "statusUpdatedAt"),
         entrypoint=_text(record, "entrypoint"),
         process_started=_text(record, "procStart"),
     )
@@ -72,6 +72,12 @@ def running(sessions_dir: Path) -> list[Entry]:
 def _text(record: dict[str, object], key: str) -> str | None:
     value = record.get(key)
     return value if isinstance(value, str) else None
+
+
+def _time(record: dict[str, object], key: str) -> datetime | None:
+    """A time Claude Code records in milliseconds since the epoch."""
+    value = record.get(key)
+    return datetime.fromtimestamp(value / 1000, UTC) if isinstance(value, int | float) else None
 
 
 def _alive(pid: int) -> bool:

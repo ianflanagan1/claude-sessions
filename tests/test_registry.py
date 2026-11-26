@@ -15,6 +15,7 @@ def record(**fields: object) -> dict[str, object]:
         "nameSource": "derived",
         "startedAt": 1793342291298,
         "updatedAt": 1793342364673,
+        "statusUpdatedAt": 1793342360000,
         "entrypoint": "claude-vscode",
         "procStart": "Fri Oct 30 06:38:10 2026",
     } | fields
@@ -30,6 +31,7 @@ def test_a_record_gives_where_the_session_started_and_its_status():
         name="app-86",
         named_by="derived",
         updated=datetime.fromtimestamp(1793342364.673, UTC),
+        status_changed=datetime.fromtimestamp(1793342360, UTC),
         entrypoint="claude-vscode",
         process_started="Fri Oct 30 06:38:10 2026",
     )
@@ -51,6 +53,7 @@ def test_a_missing_name_status_or_time_is_left_unknown():
         name=None,
         named_by=None,
         updated=None,
+        status_changed=None,
         entrypoint=None,
         process_started=None,
     )

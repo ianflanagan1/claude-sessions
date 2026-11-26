@@ -47,3 +47,18 @@ def summary(closed: int) -> str:
     """How many archived sessions were closed."""
     noun = "session" if closed == 1 else "sessions"
     return f"Closed {closed} archived {noun}."
+
+
+def summary_within(closed: int, place: str | None) -> str:
+    """How many archived sessions working in place, or anywhere when there's none, were closed."""
+    if place is None:
+        return summary(closed)
+    noun = "session" if closed == 1 else "sessions"
+    return f"Closed {closed} archived {noun} in {place}."
+
+
+def none_to_close(place: str | None) -> str:
+    """That no archived session, or none working in place, was there to close."""
+    if place is None:
+        return "No archived sessions to close."
+    return f"No archived sessions in {place} to close."

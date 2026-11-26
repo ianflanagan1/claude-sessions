@@ -5,16 +5,17 @@ Every Claude Code session running on this machine, in any terminal or editor: wh
 ```
 $ claude-sessions
 waiting  14h  opus-5-5   58k  dog-cafe-db                                       ~/projects/dog-cafe             main
+done     2m   opus-5-5   41k  Fix the release notes                             ~/projects/cli/repo-tools       main
 busy     now  opus-5-5  105k  list claude sessions                              ~/projects/cli/claude-sessions  main
 busy     3m   opus-5-5   66k  Repo-fix integration setting failure              ~/projects/cli/repo-tools       main
 idle     8m   opus-5-5   35k  Repo-fix git init behavior                        ~/projects/cli/repo-tools       main
 idle     29m  opus-5-5   33k  Named parameters across TypeScript, Java, C#, Go  ~/projects
-➖ 64 sessions: 1 waiting, 4 busy, 59 idle.
+➖ 65 sessions (1 waiting, 1 done, 4 busy, 59 idle).
 ```
 
-Each line is a session's status, how long since it was last active, its model, how much of its context it has used, its title, the directory it last worked in, and the branch checked out there. A directory longer than 35 characters is cut from the left, but no further than keeps different directories apart. Sessions waiting for you come first, then busy ones, then idle ones, each most recently active first. A session that's idle with nothing said in it yet, as when you've just opened a new chat, isn't listed, but is counted, as in `64 sessions: 1 waiting, 4 busy, 57 idle, 2 blank.` It's still a process holding memory, and a count that's suddenly all blank says Claude Code's transcripts have changed. One busy or waiting has been given its first prompt, so it's listed. `--active` lists only those waiting or busy, or with subagents running.
+Each line is a session's status, how long since it was last active, its model, how much of its context it has used, its title, the directory it last worked in, and the branch checked out there. A directory longer than 35 characters is cut from the left, but no further than keeps different directories apart. Sessions waiting for you come first, then those [done](#done) in the last 2 minutes, then busy ones, then idle ones, each most recently active first. A session that's idle with nothing said in it yet, as when you've just opened a new chat, isn't listed, but is counted, as in `64 sessions (1 waiting, 4 busy, 57 idle, 2 blank).` It's still a process holding memory, and a count that's suddenly all blank says Claude Code's transcripts have changed. One busy or waiting has been given its first prompt, so it's listed. `--active` lists only those waiting, done or busy, or with subagents running.
 
-`claude-sessions <path>` lists only the sessions working in that directory or below it, so `claude-sessions .` lists those working here. The path can be relative or absolute. A session's directory is the one shown, where it last worked, and both are compared with symbolic links resolved. It combines with `--active`, and the count is still of every session running.
+`claude-sessions <path>` lists only the sessions working in that directory or below it, so `claude-sessions .` lists those working here. The path can be relative or absolute. A session's directory is the one shown, where it last worked, and both are compared with symbolic links resolved. It combines with `--active`. Everything is then of the sessions working there: the count, blank ones among them, as in `~/projects/cli/claude-sessions: 2 sessions (1 busy, 1 idle).`, and the archived sessions closed.
 
 A session's subagents that are still running are listed under it, most recently active first, as `busy`, titled `↳` and what they were asked to do, in the directory each last worked in, such as a worktree of its own:
 
@@ -29,15 +30,19 @@ They aren't counted as sessions. A subagent runs inside its session's process, w
 - A foreground subagent runs while its session is busy or waiting on it, until its reply ends its turn or the session moves on without it, as when you interrupt it.
 - Either ends with its session's process, so one last active before that process started isn't running.
 
-On a terminal the list stays on screen and is redrawn every 2 seconds, cut to fit the window (only the sessions on screen set the columns' widths), until you press Ctrl-C; it then prints the last count. Before each redraw it closes the archived sessions `--close-archived` would, whatever path or `--active` limits the list to, without reporting them. Piped or captured, it's printed once, as above, and closes nothing.
+On a terminal the list stays on screen and is redrawn every 2 seconds, cut to fit the window (only the sessions on screen set the columns' widths), until you press Ctrl-C; it then prints the last count. Before each redraw it closes the archived sessions `--close-archived` would, working in the path given, if any, whatever `--active` limits the list to, without reporting them. Piped or captured, it's printed once, as above, and closes nothing.
 
 The title is the name you gave the session, in bold, or one Claude Code gave it; otherwise the title Claude gave the conversation, which it updates as the conversation moves on.
 
 Built on [cli-kit](../cli-kit).
 
+## Done
+
+A session is `done` for 2 minutes after it finishes a turn, so you can see which have work ready for you to look at, then `idle` again. It's done when Claude Code's record says it went idle, by `statusUpdatedAt`, less than 2 minutes ago, it has been given a prompt, and no subagent of it is still at work. That's so whether it runs in an editor's panel or a terminal. Nothing is remembered between runs: a session that finished while you weren't watching the list is idle once 2 minutes have passed.
+
 ## Closing archived sessions
 
-Archiving a session in VS Code or Cursor's Claude Code panel hides it from the list but leaves its process running, holding a couple of hundred MB. `claude-sessions --close-archived` ends them, with SIGTERM, and lists each one it closed. Watching the list on a terminal does the same every 2 seconds. Each session's history stays in its transcript, to open again from the editor's past sessions.
+Archiving a session in VS Code or Cursor's Claude Code panel hides it from the list but leaves its process running, holding a couple of hundred MB. `claude-sessions --close-archived` ends them, with SIGTERM, and lists each one it closed; `claude-sessions --close-archived <path>` only those working in that directory or below it, judged as the list judges them. Watching the list on a terminal does the same every 2 seconds. Each session's history stays in its transcript, to open again from the editor's past sessions.
 
 It closes a session only when all of these hold, and keeps it otherwise:
 
@@ -81,6 +86,7 @@ Claude Code's own files, read directly:
 | When a background subagent stopped | The task notification it sends its session, in the session's transcript |
 | When a session's process started, to leave out subagents of an earlier one | `procStart` in `~/.claude/sessions/<pid>.json` |
 | What each session edited, and where it ran commands | The tool calls in its transcript, and its subagents' in `~/.claude/projects/<dir>/<session id>/subagents/` |
+| When each session's status last changed | `statusUpdatedAt` in `~/.claude/sessions/<pid>.json` |
 | Which sessions are archived | Each editor's `state.vscdb`; see [Closing archived sessions](#closing-archived-sessions) |
 | Branch, uncommitted files, when each was last committed | `git` in the session's directory, or the repository given to `--changes`. The transcript's own `gitBranch` is the branch it started on, so isn't used |
 
