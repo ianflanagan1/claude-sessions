@@ -156,12 +156,12 @@ def test_a_session_whose_status_change_is_unknown_is_not_done():
     assert listing.session(entry, TRANSCRIPT, "main", "/home/me", [], NOW).status == "idle"
 
 
-def test_done_sessions_come_after_those_waiting_and_before_those_busy():
+def test_done_sessions_come_after_those_busy_and_before_those_idle():
     waiting = replace(SESSION, status="waiting", title="waiting")
-    done = replace(SESSION, status="done", title="done", last_active=NOW - timedelta(days=1))
-    busy = replace(SESSION, status="busy", title="busy")
-    titles = [s.title for s in listing.ordered([SESSION, busy, done, waiting])]
-    assert titles == ["waiting", "done", "busy", "Fixing the login form"]
+    done = replace(SESSION, status="done", title="done")
+    busy = replace(SESSION, status="busy", title="busy", last_active=NOW - timedelta(days=1))
+    titles = [s.title for s in listing.ordered([SESSION, done, busy, waiting])]
+    assert titles == ["waiting", "busy", "done", "Fixing the login form"]
 
 
 def test_a_done_session_is_active():
@@ -172,7 +172,7 @@ def test_a_done_session_is_active():
 
 def test_the_count_says_how_many_are_done():
     sessions = [SESSION, replace(SESSION, status="done"), replace(SESSION, status="busy")]
-    assert listing.count(sessions) == "3 sessions (1 done, 1 busy, 1 idle)."
+    assert listing.count(sessions) == "3 sessions (1 busy, 1 done, 1 idle)."
 
 
 def test_done_is_cyan():

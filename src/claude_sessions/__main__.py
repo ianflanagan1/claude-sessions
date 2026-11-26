@@ -2,8 +2,8 @@
 
 Lists each session on its own line: its status, how long since it was last active, its model,
 how much of its context it has used, its title, the directory it last worked in, cut from the left
-when long, and its git branch. Sessions waiting for you come first, then those just done, then busy
-ones, then idle ones, each most recently active first. A session's subagents still running are
+when long, and its git branch. Sessions waiting for you come first, then busy ones, then those just
+done, then idle ones, each most recently active first. A session's subagents still running are
 listed under it, marked ↳, but aren't counted as sessions. A session that's idle with nothing
 said in it yet, as when just opened, isn't listed, but is counted as blank.
 

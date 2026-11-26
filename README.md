@@ -5,15 +5,15 @@ Every Claude Code session running on this machine, in any terminal or editor: wh
 ```
 $ claude-sessions
 waiting  14h  opus-5-5   58k  dog-cafe-db                                       ~/projects/dog-cafe             main
-done     2m   opus-5-5   41k  Fix the release notes                             ~/projects/cli/repo-tools       main
 busy     now  opus-5-5  105k  list claude sessions                              ~/projects/cli/claude-sessions  main
 busy     3m   opus-5-5   66k  Repo-fix integration setting failure              ~/projects/cli/repo-tools       main
+done     2m   opus-5-5   41k  Fix the release notes                             ~/projects/cli/repo-tools       main
 idle     8m   opus-5-5   35k  Repo-fix git init behavior                        ~/projects/cli/repo-tools       main
 idle     29m  opus-5-5   33k  Named parameters across TypeScript, Java, C#, Go  ~/projects
-➖ 65 sessions (1 waiting, 1 done, 4 busy, 59 idle).
+➖ 65 sessions (1 waiting, 4 busy, 1 done, 59 idle).
 ```
 
-Each line is a session's status, how long since it was last active, its model, how much of its context it has used, its title, the directory it last worked in, and the branch checked out there. A directory longer than 35 characters is cut from the left, but no further than keeps different directories apart. Sessions waiting for you come first, then those [done](#done) in the last 2 minutes, then busy ones, then idle ones, each most recently active first. A session that's idle with nothing said in it yet, as when you've just opened a new chat, isn't listed, but is counted, as in `64 sessions (1 waiting, 4 busy, 57 idle, 2 blank).` It's still a process holding memory, and a count that's suddenly all blank says Claude Code's transcripts have changed. One busy or waiting has been given its first prompt, so it's listed. `--active` lists only those waiting, done or busy, or with subagents running.
+Each line is a session's status, how long since it was last active, its model, how much of its context it has used, its title, the directory it last worked in, and the branch checked out there. A directory longer than 35 characters is cut from the left, but no further than keeps different directories apart. Sessions waiting for you come first, then busy ones, then those [done](#done) in the last 2 minutes, then idle ones, each most recently active first. A session that's idle with nothing said in it yet, as when you've just opened a new chat, isn't listed, but is counted, as in `64 sessions (1 waiting, 4 busy, 57 idle, 2 blank).` It's still a process holding memory, and a count that's suddenly all blank says Claude Code's transcripts have changed. One busy or waiting has been given its first prompt, so it's listed. `--active` lists only those waiting, done or busy, or with subagents running.
 
 `claude-sessions <path>` lists only the sessions working in that directory or below it, so `claude-sessions .` lists those working here. The path can be relative or absolute. A session's directory is the one shown, where it last worked, and both are compared with symbolic links resolved. It combines with `--active`. Everything is then of the sessions working there: the count, blank ones among them, as in `~/projects/cli/claude-sessions: 2 sessions (1 busy, 1 idle).`, and the archived sessions closed.
 

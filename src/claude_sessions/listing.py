@@ -13,7 +13,7 @@ from claude_sessions.registry import Entry
 from claude_sessions.transcript import Transcript
 
 # Statuses in the order they're listed and counted; any other comes after them.
-_ORDER = ("waiting", "done", "busy", "idle")
+_ORDER = ("waiting", "busy", "done", "idle")
 _ACTIVE = ("waiting", "done", "busy")
 _UNKNOWN = "unknown"
 _IDLE = "idle"
@@ -142,7 +142,7 @@ def subagent(
 
 
 def ordered(sessions: Sequence[Session]) -> list[Session]:
-    """Waiting for you, then done, then busy, then idle, then any other status; within each, the
+    """Waiting for you, then busy, then done, then idle, then any other status; within each, the
     most recently active first."""
     return sorted(_by_recency(sessions), key=lambda s: _rank(s.status))
 
