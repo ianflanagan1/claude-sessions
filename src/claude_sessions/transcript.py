@@ -29,6 +29,9 @@ _TOLD_IN = ("queue-operation", "attachment", "user")
 class Transcript:
     ai_title: str | None
     """The title Claude gave the conversation, the latest of the ones it gave as it went on."""
+    custom_title: str | None
+    """The latest name you gave the session. The transcript records one given before the first
+    prompt, which Claude Code's record of the running session misses."""
     cwd: str | None
     """The directory it last worked in. (Its gitBranch is the one it started on, so isn't used.)"""
     model: str | None
@@ -45,7 +48,7 @@ class Transcript:
     """When it was last told each of its background subagents had stopped, by agent id."""
 
 
-UNKNOWN = Transcript(None, None, None, None, None, None, False, False, {})
+UNKNOWN = Transcript(None, None, None, None, None, None, None, False, False, {})
 
 
 def summarise(lines: Iterable[str]) -> Transcript:
@@ -61,7 +64,7 @@ def summarise_subagent(lines: Iterable[str]) -> Transcript:
 
 
 def _summarise(lines: Iterable[str], sidechain: bool) -> Transcript:
-    ai_title = cwd = model = None
+    ai_title = custom_title = cwd = model = None
     context_tokens = first_activity = last_activity = None
     started = ended = False
     stopped: dict[str, datetime] = {}
@@ -77,6 +80,8 @@ def _summarise(lines: Iterable[str], sidechain: bool) -> Transcript:
         match kind:
             case "ai-title":
                 ai_title = _text(record, "aiTitle") or ai_title
+            case "custom-title":
+                custom_title = _text(record, "customTitle") or custom_title
             case "user" | "assistant" if bool(record.get("isSidechain")) == sidechain:
                 cwd = _text(record, "cwd") or cwd
                 first_activity = first_activity or at
@@ -91,7 +96,16 @@ def _summarise(lines: Iterable[str], sidechain: bool) -> Transcript:
             case _:  # Other kinds of record, an open set Claude Code adds to.
                 pass
     return Transcript(
-        ai_title, cwd, model, context_tokens, first_activity, last_activity, started, ended, stopped
+        ai_title,
+        custom_title,
+        cwd,
+        model,
+        context_tokens,
+        first_activity,
+        last_activity,
+        started,
+        ended,
+        stopped,
     )
 
 

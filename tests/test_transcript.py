@@ -41,6 +41,17 @@ def test_the_title_is_the_latest_one_claude_gave_it():
     assert summary.ai_title == "Where it went"
 
 
+def test_the_name_you_gave_it_is_the_latest_one_recorded():
+    summary = transcript.summarise(
+        lines(
+            {"type": "custom-title", "customTitle": "Go purity 3"},
+            {"type": "custom-title", "customTitle": "Go proven-purity 3"},
+            {"type": "custom-title"},
+        )
+    )
+    assert summary.custom_title == "Go proven-purity 3"
+
+
 def test_where_it_is_and_what_runs_it_come_from_its_latest_reply():
     summary = transcript.summarise(
         lines(
@@ -50,6 +61,7 @@ def test_where_it_is_and_what_runs_it_come_from_its_latest_reply():
     )
     assert summary == Transcript(
         ai_title=None,
+        custom_title=None,
         cwd="/home/me/projects/app",
         model="claude-opus-5-5",
         context_tokens=52_003,
@@ -129,6 +141,7 @@ def test_a_subagents_own_transcript_tells_what_runs_it_and_how_far_it_has_got():
     )
     assert summary == Transcript(
         ai_title=None,
+        custom_title=None,
         cwd="/home/me/projects/app/.claude/worktrees/a1",
         model="claude-opus-5-5",
         context_tokens=52_003,

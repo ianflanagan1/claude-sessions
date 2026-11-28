@@ -97,10 +97,17 @@ def location(directory: str | None, resolved: str | None, root: str | None, home
 
 
 def title(entry: Entry, transcript: Transcript) -> str:
-    """The name you or Claude Code gave the session, else the title Claude gave the conversation,
-    else the name taken from its directory."""
+    """The name you or Claude Code gave the session, else the name its transcript records you gave
+    it, else the title Claude gave the conversation, else the name taken from its directory."""
     named = entry.name if entry.named_by not in (None, "derived") else None
-    return named or transcript.ai_title or entry.name or "?"
+    return named or transcript.custom_title or transcript.ai_title or entry.name or "?"
+
+
+def _user_named(entry: Entry, transcript: Transcript) -> bool:
+    """Whether the title is a name you gave the session."""
+    if entry.named_by not in (None, "derived") and entry.name:
+        return entry.named_by == "user"
+    return transcript.custom_title is not None
 
 
 def session(
@@ -125,7 +132,7 @@ def session(
         model=transcript.model,
         context_tokens=transcript.context_tokens,
         title=title(entry, transcript),
-        user_named=entry.named_by == "user",
+        user_named=_user_named(entry, transcript),
         last_active=max(times, default=None),
         subagents=tuple(_by_start(running)),
         blank=entry.status == _IDLE and not transcript.started and not running,

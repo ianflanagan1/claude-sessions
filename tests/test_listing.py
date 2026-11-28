@@ -29,6 +29,7 @@ ENTRY = Entry(
 )
 TRANSCRIPT = Transcript(
     ai_title="Fixing the login form",
+    custom_title=None,
     cwd="/home/me/projects/app/src",
     model="claude-opus-5-5",
     context_tokens=52_003,
@@ -85,6 +86,19 @@ def test_a_name_claude_code_gave_it_is_its_title_but_not_yours():
     entry = replace(ENTRY, name="Assess PHP", named_by="auto")
     session = listing.session(entry, TRANSCRIPT, "~/projects/app/src", "main", [], False, NOW)
     assert (session.title, session.user_named) == ("Assess PHP", False)
+
+
+def test_a_name_you_gave_before_the_first_prompt_is_its_title():
+    told = replace(TRANSCRIPT, custom_title="Go proven-purity 3")
+    session = listing.session(ENTRY, told, "~/projects/app/src", "main", [], False, NOW)
+    assert (session.title, session.user_named) == ("Go proven-purity 3", True)
+
+
+def test_a_name_in_claude_codes_record_of_the_session_comes_before_the_transcripts():
+    entry = replace(ENTRY, name="Go proven-purity 4", named_by="user")
+    told = replace(TRANSCRIPT, custom_title="Go proven-purity 3")
+    session = listing.session(entry, told, "~/projects/app/src", "main", [], False, NOW)
+    assert session.title == "Go proven-purity 4"
 
 
 def test_without_a_transcript_it_is_where_it_started_and_named_after_its_directory():

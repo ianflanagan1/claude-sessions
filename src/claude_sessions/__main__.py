@@ -8,8 +8,9 @@ listed under it in the order they started, marked ↳, but aren't counted as ses
 that's idle with nothing said in it yet, as when just opened, isn't listed, but is counted as
 blank.
 
-The title is the name you gave the session, in bold, or one Claude Code gave it; otherwise the
-title Claude gave the conversation, which it updates as the conversation moves on.
+The title is the name you gave the session, in bold, even one given before its first prompt, or one
+Claude Code gave it; otherwise the title Claude gave the conversation, which it updates as the
+conversation moves on.
 
 A session is done for 2 minutes after it finishes a turn, for you to look at, and idle after.
 One archived in VS Code or Cursor's Claude Code panel has -archived after its status, as in

@@ -143,6 +143,7 @@ def test_a_sessions_subagents_are_read_from_their_transcripts_and_metadata(tmp_p
             Meta("Transition fields on move", Shape.BACKGROUND),
             Transcript(
                 ai_title=None,
+                custom_title=None,
                 cwd="/home/me/app",
                 model=None,
                 context_tokens=None,
